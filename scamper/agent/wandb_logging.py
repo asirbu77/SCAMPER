@@ -243,12 +243,12 @@ def wandb_progress(num_steps: int, metrics: dict[str, Any]) -> None:
     Adds the step count to metrics and commits the log entry.
 
     Args:
-        num_steps: Current training step count (logged as num_steps_thousands).
+        num_steps: Current training step count.
         metrics: Dictionary of metric names to values to log.
 
     Note:
         This function commits the log (unlike other logging functions in this
         module), so it should be called last in a logging batch.
     """
-    metrics["num_steps_thousands"] = num_steps
+    metrics["num_steps"] = num_steps
     wandb.log(metrics)

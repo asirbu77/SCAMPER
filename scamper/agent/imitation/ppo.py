@@ -57,7 +57,6 @@ InferenceParams = tuple[DictRunningStatisticsState, Params]
 Metrics = types.Metrics
 
 # Constants
-STEPS_IN_THOUSANDS = 1e3
 _PMAP_AXIS_NAME = "i"
 
 
@@ -444,7 +443,7 @@ def train(
             normalizer_params=normalizer_params,
             env_steps=jnp.int32(
                 training_state.env_steps
-                + env_step_per_training_step / STEPS_IN_THOUSANDS
+                + env_step_per_training_step / 1e3
             ),  # env step in thousands
         )
         return (new_training_state, state, new_key, it), metrics
@@ -855,7 +854,7 @@ def train(
 
             # log metrics
             logging.info(metrics)
-            progress_fn(current_step, metrics)
+            progress_fn(int(current_step * 1e3), metrics)
             # Save checkpoint
             if ckpt_mgr is not None:
                 checkpointing.save(
