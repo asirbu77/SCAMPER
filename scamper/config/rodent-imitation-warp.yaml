@@ -23,7 +23,7 @@ env_config:
   solver: "newton"
   iterations: 5           # Max solver iterations per step
   ls_iterations: 5        # Line search iterations for Newton solver
-  naconmax: 49152         # num_envs * 12
+  naconmax: 24576         # num_envs * 12
   njmax: 600              # Max constraint rows
   noslip_iterations: 0    # No-slip solver iterations (0 = disabled)
 
@@ -178,7 +178,7 @@ train_setup:
   # PPO Training Hyperparameters
   # ---------------------------------------------------------------------------
   train_config:
-    num_envs: 4096                    # Parallel environments
+    num_envs: 2048                    # Parallel environments
     num_timesteps: 3_000_000_000      # Total training steps
     batch_size: 1024                  # Samples per gradient update
     num_minibatches: 16               # Minibatches per epoch
