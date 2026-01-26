@@ -1,8 +1,8 @@
-# track-mjx
+# SCAMPER
 
 Inverse kinematics via reinforcement learning after model registration.
 
-> This is a work in progress documentation sites for the `track-mjx` package.   
+> This is a work in progress documentation sites for the `SCAMPER` package.
 
 # Quick Start:
 
@@ -12,7 +12,7 @@ Inverse kinematics via reinforcement learning after model registration.
 
 <!-- Need to re-test the docker system locally in Linux/Windows -->
 
-First, pull the docker image from the DockerHub registry 
+First, pull the docker image from the DockerHub registry
 
 ```bash
 docker ...
@@ -27,15 +27,15 @@ docker ...
 First, clone the repository with the following command
 
 ```bash
-git clone https://github.com/talmolab/track-mjx.git
-cd track-mjx
+git clone https://github.com/asirbu77/SCAMPER.git
+cd SCAMPER
 ```
 
 
 
 ## `screen` based terminal
 
-## 
+##
 
 ## Usage
 
@@ -44,4 +44,4 @@ cd track-mjx
 
 ## License
 This package is distributed under a BSD 3-Clause License and can be used without
-restrictions. See [`LICENSE`](https://github.com/talmolab/track-mjx/blob/main/LICENSE) for details.
+restrictions. See [`LICENSE`](https://github.com/asirbu77/SCAMPER/blob/main/LICENSE) for details.

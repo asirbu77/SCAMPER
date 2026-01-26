@@ -1,12 +1,12 @@
-# track-mjx
+# SCAMPER
 
 This is a package for training control policies through motion imitation using deep reinforcement learning. Part of [MIMIC-MJX](https://mimic-mjx.talmolab.org/), along with [STAC-MJX](https://github.com/talmolab/stac-mjx) (a tool for performing inverse kinematics on markerless motion tracking data).
 
 ## IMPORTANT (For reviewers and new users):
-**Please use the latest stable version of track-mjx (v0.0.1) for notebook demos and running rodent training example.**
+**Please use the latest stable version of SCAMPER (v0.0.1) for notebook demos and running rodent training example.**
 
-## Prerelease (track-mjx >= v1.0.0)
-**track-mjx v1 will soon include all body models, related notebooks and training logic. track-mjx v1 and on will rely on [vnl-playground](https://github.com/talmolab/vnl-playground) for the environment and task logic. vnl-playground will be installed during the following installation steps along with other needed libraries. For more information regarding the environment and task logic, please visit [vnl-playground](https://github.com/talmolab/vnl-playground).**
+## Prerelease (SCAMPER >= v1.0.0)
+**SCAMPER v1 will soon include all body models, related notebooks and training logic. SCAMPER v1 and on will rely on [vnl-playground](https://github.com/talmolab/vnl-playground) for the environment and task logic. vnl-playground will be installed during the following installation steps along with other needed libraries. For more information regarding the environment and task logic, please visit [vnl-playground](https://github.com/talmolab/vnl-playground).**
 
 ## Installation
 
@@ -18,7 +18,7 @@ This is a package for training control policies through motion imitation using d
 - [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
 - CUDA 12.x or 13.x (for GPU support, optional)
 
-#### Installing `uv` 
+#### Installing `uv`
 
 If you don't have uv installed:
 
@@ -34,8 +34,8 @@ pip install uv
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/talmolab/track-mjx.git
-cd track-mjx
+git clone https://github.com/asirbu77/SCAMPER.git
+cd SCAMPER
 ```
 2. Create and activate a virtual environment:
 ```bash
@@ -69,7 +69,7 @@ python -c "import jax; print(f'JAX version: {jax.__version__}'); print(f'Availab
 ```
 5. Register the environment as a Jupyter kernel:
 ```bash
-python -m ipykernel install --user --name=track-mjx --display-name="Python (track-mjx)"
+python -m ipykernel install --user --name=scamper --display-name="Python (scamper)"
 ```
 6. Test the environment:
     Execute the tests in [`notebooks/test_setup.ipynb`](notebooks/test_setup.ipynb). This will check if MuJoCo, GPU support and Jax appear to be working.
@@ -107,7 +107,7 @@ Expected output:
 
 1. Clone the repository:
     ```bash
-    git clone https://github.com/talmolab/track-mjx.git && cd track-mjx
+    git clone https://github.com/asirbu77/SCAMPER.git && cd SCAMPER
     ```
 2. Create a new development environment via `conda` (this will create the necessary base environment):
     ```bash
@@ -115,7 +115,7 @@ Expected output:
     ```
 3. Activate the environment:
     ```bash
-    conda activate track-mjx
+    conda activate scamper
     ```
 4. Install the package with desired CUDA version:
     If your machine supports up to CUDA 13:
@@ -138,7 +138,7 @@ Expected output:
 
 ### Rodent
 
-The main training entrypoint is defined in [`track_mjx/train.py`](track_mjx/train.py) and relies on the config in [`track_mjx/config/rodent-full-clips.yaml`](track_mjx/config/rodent-full-clips.yaml).
+The main training entrypoint is defined in [`scamper/train.py`](scamper/train.py) and relies on the config in [`scamper/config/rodent-full-clips.yaml`](scamper/config/rodent-full-clips.yaml).
 
 #### Download the data
 
@@ -155,29 +155,29 @@ python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id=
 
 **Using uv:**
 ```bash
-uv run python -m track_mjx.train --config-name rodent-full-clips.yaml
+uv run python -m scamper.train --config-name rodent-full-clips.yaml
 ```
 
 **Using conda:**
 ```bash
-conda activate track_mjx
-python -m track_mjx.train --config-name rodent-full-clips.yaml
+conda activate scamper
+python -m scamper.train --config-name rodent-full-clips.yaml
 ```
 
 
 ## Citation
 
-If you use track-mjx in your research, please cite our paper:
+If you use SCAMPER in your research, please cite our paper:
 
 ```bibtex
 @misc{zhang2025mimicmjxneuromechanicalemulationanimal,
-      title={MIMIC-MJX: Neuromechanical Emulation of Animal Behavior}, 
+      title={MIMIC-MJX: Neuromechanical Emulation of Animal Behavior},
       author={Charles Y. Zhang and Yuanjia Yang and Aidan Sirbu and Elliott T. T. Abe and Emil Wärnberg and Eric J. Leonardis and Diego E. Aldarondo and Adam Lee and Aaditya Prasad and Jason Foat and Kaiwen Bian and Joshua Park and Rusham Bhatt and Hutton Saunders and Akira Nagamori and Ayesha R. Thanawalla and Kee Wui Huang and Fabian Plum and Hendrik K. Beck and Steven W. Flavell and David Labonte and Blake A. Richards and Bingni W. Brunton and Eiman Azim and Bence P. Ölveczky and Talmo D. Pereira},
       year={2025},
       eprint={2511.20532},
       archivePrefix={arXiv},
       primaryClass={q-bio.NC},
-      url={https://arxiv.org/abs/2511.20532}, 
+      url={https://arxiv.org/abs/2511.20532},
 }
 ```
 
@@ -186,4 +186,4 @@ If you use track-mjx in your research, please cite our paper:
 
 ## License
 This package is distributed under a BSD 3-Clause License and can be used without
-restrictions. See [`LICENSE`](https://github.com/talmolab/track-mjx/blob/main/LICENSE) for details.
+restrictions. See [`LICENSE`](https://github.com/asirbu77/SCAMPER/blob/main/LICENSE) for details.

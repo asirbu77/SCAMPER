@@ -1,6 +1,6 @@
-site_name: track-mjx documentation
-site_url: https://talmolab.github.io/track-mjx/
-repo_url: https://github.com/talmolab/track-mjx
+site_name: SCAMPER documentation
+site_url: https://asirbu77.github.io/SCAMPER/
+repo_url: https://github.com/asirbu77/SCAMPER
 
 theme:
   name: material
@@ -70,7 +70,7 @@ plugins:
             docstring_options:
               returns_multiple_items: false
             docstring_section_style: table  # table, list, spacy
-  
+
 
 
 markdown_extensions:
@@ -118,7 +118,7 @@ markdown_extensions:
 extra:
   consent:
     title: Cookie consent
-    description: >- 
+    description: >-
       We use cookies to recognize your repeated visits and preferences, as well
       as to measure the effectiveness of our documentation and whether users
       find what they're searching for. With your consent, you're helping us to
@@ -136,7 +136,7 @@ extra:
     provider: mike
 
   social:
-    - icon: fontawesome/brands/github 
+    - icon: fontawesome/brands/github
       link: https://github.com/talmolab
     - icon: fontawesome/brands/x-twitter
       link: https://twitter.com/talmop

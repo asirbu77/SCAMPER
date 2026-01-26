@@ -3,13 +3,13 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "track-mjx"
+name = "scamper"
 authors = [
     {name = "Charles Zhang", email = "charleszhang@fas.harvard.edu"},
     {name = "Scott Yang", email = "scyang@salk.com"},
     {name = "Aidan Sirbu", email = "aidan.sirbu@mail.mcgill.ca"},
     {name = "Talmo Pereira", email = "talmo@salk.edu"}]
-description=  "Track-MJX: A Python package for fast reinforcement learning-based imitation learning tracking for agents"
+description=  "SCAMPER: A Python package for fast reinforcement learning-based imitation learning tracking for agents"
 requires-python = ">=3.12,<3.13"
 keywords = ["tracking", "imitation learning", "deep learning"]
 license = {text = "BSD-3-Clause"}
@@ -52,7 +52,7 @@ dependencies = [
 dynamic = ["version", "readme"]
 
 [tool.setuptools.dynamic]
-version = {attr = "track_mjx.version.__version__"}
+version = {attr = "scamper.version.__version__"}
 readme = {file = ["README.md"], content-type="text/markdown"}
 
 [project.optional-dependencies]
@@ -77,7 +77,7 @@ dev = [
     ]
 
 [project.urls]
-Repository = "https://github.com/talmolab/track-mjx"
+Repository = "https://github.com/asirbu77/SCAMPER"
 
 [tool.setuptools.packages.find]
 exclude = ["site", "model_checkpoints*", "wandb", "outputs"]
@@ -91,7 +91,7 @@ playground = { git = "https://github.com/google-deepmind/mujoco_playground", rev
 
 [pydocstyle]
 convention = "google"
-match-dir = "track_mjx"
+match-dir = "scamper"
 
 [dependency-groups]
 dev = [

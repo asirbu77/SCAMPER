@@ -1,4 +1,4 @@
-# track-mjx specific gitignore:
+# SCAMPER specific gitignore:
 data/
 model_checkpoints/
 wandb/

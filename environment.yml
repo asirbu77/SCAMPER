@@ -1,4 +1,4 @@
-name: track_mjx
+name: scamper
 channels:
   - conda-forge
 
