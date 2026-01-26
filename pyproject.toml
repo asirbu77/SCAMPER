@@ -1,0 +1,99 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "track-mjx"
+authors = [
+    {name = "Charles Zhang", email = "charleszhang@fas.harvard.edu"},
+    {name = "Scott Yang", email = "scyang@salk.com"},
+    {name = "Aidan Sirbu", email = "aidan.sirbu@mail.mcgill.ca"},
+    {name = "Talmo Pereira", email = "talmo@salk.edu"}]
+description=  "Track-MJX: A Python package for fast reinforcement learning-based imitation learning tracking for agents"
+requires-python = ">=3.12,<3.13"
+keywords = ["tracking", "imitation learning", "deep learning"]
+license = {text = "BSD-3-Clause"}
+classifiers = [
+    "Programming Language :: Python :: 3.12"]
+dependencies = [
+    # JAX core (both platforms)
+    "jax>=0.8.2",
+    "jaxlib>=0.8.2",
+    "brax==0.14.0",
+    "flax",
+    "optax>=0.2.6",
+    "orbax-checkpoint",
+    # MuJoCo
+    "mujoco-mjx[warp]>=3.4.0",
+    # Rendering (EGL/osmesa support)
+    "PyOpenGL==3.1.9",
+    # Data & ML utilities
+    "numpy==2.0.0",
+    "h5py==3.12.1",
+    "numba==0.61.0",
+    "scikit-learn==1.7.2",
+    # Visualization
+    "matplotlib==3.10.0",
+    "seaborn==0.13.2",
+    "pandas",
+    "mediapy==1.2.2",
+    "imageio[ffmpeg]==2.37.0",
+    # Config & logging
+    "hydra-core==1.3.2",
+    "wandb==0.19.5",
+    # HuggingFace for model/data downloads
+    "huggingface-hub",
+    # Other utilities
+    "playground",
+    "ipykernel",
+    "vnl-playground",
+]
+
+dynamic = ["version", "readme"]
+
+[tool.setuptools.dynamic]
+version = {attr = "track_mjx.version.__version__"}
+readme = {file = ["README.md"], content-type="text/markdown"}
+
+[project.optional-dependencies]
+cuda12 = ["jax[cuda12]>=0.8.2 ; sys_platform == 'linux'"]
+cuda13 = ["jax[cuda13]>=0.8.2 ; sys_platform == 'linux'"]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-watch",
+    "black[jupyter]>=26.1.0",
+    "pydocstyle",
+    "toml",
+    "twine",
+    "build",
+    "mkdocs-material[imaging]",
+    "mkdocs-jupyter",
+    "mkdocstrings[python]>=0.18",
+    "mkdocs-gen-files",
+    "mkdocs-literate-nav",
+    "mkdocs-section-index",
+    "mike",
+    ]
+
+[project.urls]
+Repository = "https://github.com/talmolab/track-mjx"
+
+[tool.setuptools.packages.find]
+exclude = ["site", "model_checkpoints*", "wandb", "outputs"]
+
+[tool.black]
+line-length = 88
+
+[tool.uv.sources]
+vnl-playground = { git = "https://github.com/talmolab/vnl-playground", tag = "v0.0.11" }
+playground = { git = "https://github.com/google-deepmind/mujoco_playground", rev = "b63fcb5db02a0f27aaf2b29ce6fc14c75489fa16" }
+
+[pydocstyle]
+convention = "google"
+match-dir = "track_mjx"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.31.0",
+]

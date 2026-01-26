@@ -1,0 +1,12 @@
+name: track_mjx
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.12
+  - ffmpeg
+  - jupyterlab
+  - mesalib
+  - pip
+  - pip:
+    - "--editable=."
