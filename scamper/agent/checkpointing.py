@@ -27,8 +27,6 @@ from omegaconf import DictConfig, OmegaConf
 
 from scamper.agent.imitation import losses as imitation_losses
 from scamper.agent.imitation import ppo_networks as imitation_networks
-from scamper.agent.recurrent_ppo import losses as recurrent_ppo_losses
-from scamper.agent.recurrent_ppo import networks as recurrent_ppo_networks
 from scamper.agent.observation_utils import (
     convert_flat_to_dict_normalizer,
     init_dict_normalizer,
@@ -196,23 +194,10 @@ def make_abstract_policy(
     ppo_network = make_ppo_network_from_cfg(cfg)
     key_policy, key_value = jax.random.split(jax.random.key(seed))
 
-    arch_name = cfg.network_config.get("arch_name")
-    if arch_name is None:
-        logging.warning(
-            "arch_name not found in network_config, defaulting to 'intention'. "
-            "If this is unexpected, check your config file."
-        )
-        arch_name = "intention"
-    if arch_name == "recurrent_intention":
-        init_params = recurrent_ppo_losses.RecurrentPPONetworkParams(
-            policy=ppo_network.policy_network.init(key_policy),
-            value=ppo_network.value_network.init(key_value),
-        )
-    else:
-        init_params = imitation_losses.PPONetworkParams(
-            policy=ppo_network.policy_network.init(key_policy),
-            value=ppo_network.value_network.init(key_value),
-        )
+    init_params = imitation_losses.PPONetworkParams(
+        policy=ppo_network.policy_network.init(key_policy),
+        value=ppo_network.value_network.init(key_value),
+    )
 
     # Handle both new (dict-based) and legacy (flat) config formats
     network_config = cfg["network_config"]
@@ -246,25 +231,12 @@ def load_inference_fn(
         policy_params: Tuple of (normalizer_state, policy_params).
         deterministic: If True, use mean action (no sampling).
         get_activation: If True, return network activations in extras.
-            Only used for feedforward networks.
 
     Returns:
-        For feedforward: Inference function (obs, rng) -> (action, extras).
-        For recurrent: Inference function (obs, hidden, rng) -> (action, extras, new_hidden).
+        Inference function (obs, rng) -> (action, extras).
     """
     ppo_network = make_ppo_network_from_cfg(cfg)
-    arch_name = cfg.network_config.get("arch_name")
-    if arch_name is None:
-        logging.warning(
-            "arch_name not found in network_config, defaulting to 'intention'. "
-            "If this is unexpected, check your config file."
-        )
-        arch_name = "intention"
-
-    if arch_name == "recurrent_intention":
-        make_policy = recurrent_ppo_networks.make_inference_fn(ppo_network)
-    else:
-        make_policy = imitation_networks.make_inference_fn(ppo_network)
+    make_policy = imitation_networks.make_inference_fn(ppo_network)
 
     # Convert legacy flat normalizer to dict normalizer if needed
     normalizer_state, network_params = policy_params
@@ -283,12 +255,9 @@ def load_inference_fn(
         )
         policy_params = (normalizer_state, network_params)
 
-    if arch_name == "recurrent_intention":
-        return make_policy(policy_params, deterministic=deterministic)
-    else:
-        return make_policy(
-            policy_params, deterministic=deterministic, get_activation=get_activation
-        )
+    return make_policy(
+        policy_params, deterministic=deterministic, get_activation=get_activation
+    )
 
 
 def make_ppo_network_from_cfg(cfg: DictConfig) -> Any:
@@ -298,18 +267,11 @@ def make_ppo_network_from_cfg(cfg: DictConfig) -> Any:
         cfg: Configuration with network_config and train_setup sections.
 
     Returns:
-        PPONetworks or RecurrentPPONetworks with policy_network and value_network.
+        PPONetworks with policy_network and value_network.
 
     Raises:
         ValueError: If network architecture is not recognized.
     """
-    arch_name = cfg.network_config.get("arch_name")
-    if arch_name is None:
-        logging.warning(
-            "arch_name not found in network_config, defaulting to 'intention'. "
-            "If this is unexpected, check your config file."
-        )
-        arch_name = "intention"
     network_config = cfg.network_config
 
     # Handle both new (dict-based) and legacy (flat) config formats
@@ -324,27 +286,14 @@ def make_ppo_network_from_cfg(cfg: DictConfig) -> Any:
             - network_config.reference_obs_size,
         }
 
-    if arch_name == "intention":
-        return imitation_networks.make_intention_ppo_networks(
-            obs_sizes=obs_sizes,
-            action_size=network_config.action_size,
-            intention_latent_size=network_config.intention_size,
-            encoder_hidden_layer_sizes=tuple(network_config.encoder_layer_sizes),
-            decoder_hidden_layer_sizes=tuple(network_config.decoder_layer_sizes),
-            value_hidden_layer_sizes=tuple(network_config.critic_layer_sizes),
-        )
-    elif arch_name == "recurrent_intention":
-        return recurrent_ppo_networks.make_recurrent_intention_ppo_networks(
-            obs_sizes=obs_sizes,
-            action_size=network_config.action_size,
-            intention_latent_size=network_config.intention_size,
-            encoder_hidden_layer_sizes=tuple(network_config.encoder_layer_sizes),
-            rnn_type=network_config.rnn_type,
-            rnn_hidden_sizes=tuple(network_config.rnn_hidden_sizes),
-            value_hidden_layer_sizes=tuple(network_config.critic_layer_sizes),
-        )
-    else:
-        raise ValueError(f"Unknown network architecture: {arch_name}")
+    return imitation_networks.make_intention_ppo_networks(
+        obs_sizes=obs_sizes,
+        action_size=network_config.action_size,
+        intention_latent_size=network_config.intention_size,
+        encoder_hidden_layer_sizes=tuple(network_config.encoder_layer_sizes),
+        decoder_hidden_layer_sizes=tuple(network_config.decoder_layer_sizes),
+        value_hidden_layer_sizes=tuple(network_config.critic_layer_sizes),
+    )
 
 
 def save(

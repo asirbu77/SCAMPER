@@ -3,8 +3,6 @@
 This module provides functions to create VNL environments and generate policy
 rollouts with optional logging of activations, metrics, and sensor data.
 Rollouts can be used for evaluation, visualization, or data collection.
-
-Supports both feedforward and recurrent policies.
 """
 
 from typing import Any, Callable
@@ -65,8 +63,7 @@ def create_rollout_generator(
             (mocap_hz, ctrl_dt, clip_length) and network_config with arch_name,
             obs_sizes, and architecture hyperparameters.
         env: The VNL environment to run rollouts in.
-        inference_fn: Policy function. For feedforward: (obs, rng) -> (action, extras).
-            For recurrent: (obs, hidden, rng) -> (action, extras, new_hidden).
+        inference_fn: Policy function with signature (obs, rng) -> (action, extras).
             The extras dict should contain "activations" if log_activations=True.
         log_full_states: If True, include full State objects in the rollout output.
             WARNING: This uses significant memory when batched.
