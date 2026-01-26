@@ -174,7 +174,6 @@ def main(cfg: DictConfig) -> None:
             else None
         ),
         freeze_decoder=cfg.train_setup.get("freeze_decoder", False),
-        get_activation=cfg.train_setup.train_config.get("get_activation", False),
     )
 
     train_fn = functools.partial(imitation_ppo.train, **train_kwargs)
