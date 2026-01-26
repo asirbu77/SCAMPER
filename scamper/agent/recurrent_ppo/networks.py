@@ -24,7 +24,7 @@ from brax.training import distribution, networks, types
 from brax.training.types import PRNGKey
 from flax import linen as nn
 
-from scamper.agent.ff_ppo.intention_network import Encoder, reparameterize
+from scamper.agent.imitation.intention_network import Encoder, reparameterize
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,

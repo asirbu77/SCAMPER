@@ -19,7 +19,7 @@ import jax.numpy as jnp
 from brax.training import types
 from brax.training.types import Params
 
-from scamper.agent.ff_ppo.losses import (
+from scamper.agent.imitation.losses import (
     compute_ar1_temporal_loss,
     compute_gae,
     compute_kl_to_gaussian_prior,

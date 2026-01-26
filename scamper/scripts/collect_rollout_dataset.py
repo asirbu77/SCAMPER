@@ -47,7 +47,7 @@ from scamper.agent.mlp_prior.prior_rollout_eval import (
     create_prior_policy,
     extract_prior_decoder_params,
 )
-from scamper.agent.ff_ppo import intention_network
+from scamper.agent.imitation import intention_network
 from scamper.agent.observation_utils import (
     convert_flat_to_dict_normalizer,
     DictRunningStatisticsState,

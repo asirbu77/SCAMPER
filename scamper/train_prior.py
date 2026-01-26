@@ -1,6 +1,6 @@
 """
 Entry point for prior network training.
-Load the config file, create environments, load pretrained ff_ppo encoder/decoder,
+Load the config file, create environments, load pretrained imitation encoder/decoder,
 and start prior training with KL loss.
 """
 
@@ -273,8 +273,8 @@ def main(cfg: DictConfig):
         ),
         num_resets_per_eval=cfg.train_setup.eval_every // cfg.train_setup.reset_every,
         episode_length=episode_length,
-        ff_ppo_checkpoint_path=cfg.teacher_config.checkpoint_path,
-        ff_ppo_checkpoint_step=cfg.teacher_config.checkpoint_step,
+        imitation_checkpoint_path=cfg.teacher_config.checkpoint_path,
+        imitation_checkpoint_step=cfg.teacher_config.checkpoint_step,
         kl_weight=prior_cfg.kl_weight,
         use_kl_schedule=prior_cfg.get("use_kl_schedule", True),
         kl_schedule_params=(

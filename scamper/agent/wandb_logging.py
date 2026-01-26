@@ -15,7 +15,7 @@ import wandb
 from jax import numpy as jnp
 from omegaconf import DictConfig, OmegaConf
 
-from scamper.agent.ff_ppo import losses
+from scamper.agent.imitation import losses
 
 
 def rollout_logging_fn(

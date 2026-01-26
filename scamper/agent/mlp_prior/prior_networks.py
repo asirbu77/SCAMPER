@@ -2,7 +2,7 @@
 Network definitions for prior training.
 
 This module provides:
-- Loading frozen encoder/decoder from ff_ppo checkpoint
+- Loading frozen encoder/decoder from imitation checkpoint
 - Creating trainable prior network
 - Combining networks for checkpointing in distill-compatible format
 
@@ -22,9 +22,9 @@ from brax.training.acme import running_statistics, specs
 from flax import linen as nn
 from omegaconf import OmegaConf
 
-from scamper.agent.ff_ppo import intention_network
-from scamper.agent.ff_ppo import ppo_networks as ff_ppo_networks
-from scamper.agent.ff_ppo import losses as ff_ppo_losses
+from scamper.agent.imitation import intention_network
+from scamper.agent.imitation import ppo_networks as imitation_networks
+from scamper.agent.imitation import losses as imitation_losses
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     normalize_dict_obs,
@@ -125,10 +125,10 @@ def load_frozen_encoder_decoder(
     checkpoint_path: str,
     step: int | None = None,
 ) -> Tuple[Dict, Dict, DictRunningStatisticsState, Dict]:
-    """Load encoder and decoder parameters from ff_ppo checkpoint.
+    """Load encoder and decoder parameters from imitation checkpoint.
 
     Args:
-        checkpoint_path: Path to the ff_ppo checkpoint directory.
+        checkpoint_path: Path to the imitation checkpoint directory.
         step: Specific step to load. If None, loads the latest.
 
     Returns:
@@ -154,7 +154,7 @@ def load_frozen_encoder_decoder(
     if obs_sizes is not None:
         # New dict-based format
         obs_sizes = dict(obs_sizes)
-        ppo_network = ff_ppo_networks.make_intention_ppo_networks(
+        ppo_network = imitation_networks.make_intention_ppo_networks(
             obs_sizes=obs_sizes,
             action_size=cfg.network_config.action_size,
             intention_latent_size=cfg.network_config.intention_size,
@@ -164,7 +164,7 @@ def load_frozen_encoder_decoder(
         )
 
         key_policy, key_value = jax.random.split(jax.random.key(1))
-        init_params = ff_ppo_losses.PPONetworkParams(
+        init_params = imitation_losses.PPONetworkParams(
             policy=ppo_network.policy_network.init(key_policy),
             value=ppo_network.value_network.init(key_value),
         )
@@ -205,7 +205,7 @@ def load_frozen_encoder_decoder(
 
         # Create legacy network for structure matching
         # Note: This uses an older signature that we need for legacy checkpoints
-        ppo_network = ff_ppo_networks.make_intention_ppo_networks(
+        ppo_network = imitation_networks.make_intention_ppo_networks(
             obs_sizes={
                 "imitation_target": reference_obs_size,
                 "proprioception": observation_size - reference_obs_size,
@@ -218,7 +218,7 @@ def load_frozen_encoder_decoder(
         )
 
         key_policy, key_value = jax.random.split(jax.random.key(1))
-        init_params = ff_ppo_losses.PPONetworkParams(
+        init_params = imitation_losses.PPONetworkParams(
             policy=ppo_network.policy_network.init(key_policy),
             value=ppo_network.value_network.init(key_value),
         )
@@ -441,8 +441,8 @@ def create_combined_checkpoint_params(
     (normalizer_params, {"params": {"encoder": ..., "decoder": ..., "prior": ...}})
 
     Args:
-        encoder_params: Encoder parameters (from ff_ppo).
-        decoder_params: Decoder parameters (from ff_ppo).
+        encoder_params: Encoder parameters (from imitation).
+        decoder_params: Decoder parameters (from imitation).
         prior_params: Prior parameters (newly trained).
         normalizer_params: Dict observation normalizer parameters.
 

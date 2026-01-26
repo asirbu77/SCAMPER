@@ -24,7 +24,7 @@ from brax.training.types import PRNGKey
 from jax import numpy as jnp
 
 from scamper.agent import checkpointing
-from scamper.agent.ff_ppo import intention_network
+from scamper.agent.imitation import intention_network
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,

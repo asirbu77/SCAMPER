@@ -16,7 +16,7 @@ from brax.training import distribution
 from brax.training.acme import running_statistics, specs
 from omegaconf import OmegaConf
 
-from scamper.agent.ff_ppo import intention_network
+from scamper.agent.imitation import intention_network
 from scamper.agent.mlp_prior.prior_networks import Prior
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,

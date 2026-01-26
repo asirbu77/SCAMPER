@@ -25,8 +25,8 @@ from brax.training.acme import running_statistics, specs
 from jax import numpy as jnp
 from omegaconf import DictConfig, OmegaConf
 
-from scamper.agent.ff_ppo import losses as ff_ppo_losses
-from scamper.agent.ff_ppo import ppo_networks as ff_ppo_networks
+from scamper.agent.imitation import losses as imitation_losses
+from scamper.agent.imitation import ppo_networks as imitation_networks
 from scamper.agent.recurrent_ppo import losses as recurrent_ppo_losses
 from scamper.agent.recurrent_ppo import networks as recurrent_ppo_networks
 from scamper.agent.observation_utils import (
@@ -209,7 +209,7 @@ def make_abstract_policy(
             value=ppo_network.value_network.init(key_value),
         )
     else:
-        init_params = ff_ppo_losses.PPONetworkParams(
+        init_params = imitation_losses.PPONetworkParams(
             policy=ppo_network.policy_network.init(key_policy),
             value=ppo_network.value_network.init(key_value),
         )
@@ -264,7 +264,7 @@ def load_inference_fn(
     if arch_name == "recurrent_intention":
         make_policy = recurrent_ppo_networks.make_inference_fn(ppo_network)
     else:
-        make_policy = ff_ppo_networks.make_inference_fn(ppo_network)
+        make_policy = imitation_networks.make_inference_fn(ppo_network)
 
     # Convert legacy flat normalizer to dict normalizer if needed
     normalizer_state, network_params = policy_params
@@ -325,7 +325,7 @@ def make_ppo_network_from_cfg(cfg: DictConfig) -> Any:
         }
 
     if arch_name == "intention":
-        return ff_ppo_networks.make_intention_ppo_networks(
+        return imitation_networks.make_intention_ppo_networks(
             obs_sizes=obs_sizes,
             action_size=network_config.action_size,
             intention_latent_size=network_config.intention_size,

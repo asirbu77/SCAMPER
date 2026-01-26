@@ -20,7 +20,7 @@ from vnl_playground import registry
 
 from scamper.config import utils
 from scamper.agent import checkpointing, wandb_logging
-from scamper.agent.ff_ppo import ppo as ff_ppo, ppo_networks as ff_networks
+from scamper.agent.imitation import ppo as imitation_ppo, ppo_networks as imitation_networks
 from scamper.agent.recurrent_ppo import (
     ppo as recurrent_ppo,
     networks as recurrent_networks,
@@ -145,13 +145,13 @@ def main(cfg: DictConfig) -> None:
     else:
         # Feedforward intention network (default)
         network_factory = functools.partial(
-            ff_networks.make_intention_ppo_networks,
+            imitation_networks.make_intention_ppo_networks,
             intention_latent_size=cfg.network_config.intention_size,
             encoder_hidden_layer_sizes=tuple(cfg.network_config.encoder_layer_sizes),
             decoder_hidden_layer_sizes=tuple(cfg.network_config.decoder_layer_sizes),
             value_hidden_layer_sizes=tuple(cfg.network_config.critic_layer_sizes),
         )
-        ppo_module = ff_ppo
+        ppo_module = imitation_ppo
 
     # Determine wandb run ID for resuming
     wandb_logging.initialize_wandb_logging(

@@ -44,7 +44,7 @@ from mujoco_playground import wrapper as mp_wrapper
 from optax.transforms import freeze
 
 from scamper.agent import checkpointing, gradients, network_masks
-from scamper.agent.ff_ppo import losses, ppo_networks
+from scamper.agent.imitation import losses, ppo_networks
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,

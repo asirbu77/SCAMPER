@@ -20,7 +20,7 @@ from brax.training import distribution, networks
 from brax.training.acme import running_statistics
 from flax import linen as nn
 
-from scamper.agent.ff_ppo.intention_network import Decoder
+from scamper.agent.imitation.intention_network import Decoder
 
 
 class ScratchPolicy(nn.Module):
