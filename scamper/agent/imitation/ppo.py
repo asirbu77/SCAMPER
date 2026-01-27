@@ -521,7 +521,6 @@ def train(
     # We'll extract the sizes after the first reset
     # Legacy size extraction for compatibility (used in frozen decoder logic)
     proprioceptive_obs_size = int(environment.proprioceptive_obs_size)
-    logging.info(f"Proprioceptive observation size: {proprioceptive_obs_size}")
 
     env = wrap_for_training(
         environment,
