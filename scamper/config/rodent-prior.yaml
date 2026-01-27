@@ -12,7 +12,7 @@
 # Path to the pretrained imitation checkpoint with encoder and decoder
 teacher_config:
   # Path to pretrained imitation checkpoint (REQUIRED)
-  checkpoint_path: "/home/mila/a/aidan.sirbu/scratch/scamper/model_checkpoints/charlesrodent"
+  checkpoint_path: null
   checkpoint_step: null               # Specific step to load (null = latest)
 
 # =============================================================================
@@ -32,7 +32,7 @@ env_config:
   solver: "newton"
   iterations: 5
   ls_iterations: 5
-  nconmax: 256
+  naconmax: 24576         # num_envs * 12
   njmax: 128
   noslip_iterations: 0
 
@@ -164,20 +164,15 @@ prior_config:
 # Training Setup
 # =============================================================================
 train_setup:
-  agent_name: rodent_prior
-  run_name: prior_training
-
   # Checkpointing and restoration
   checkpoint_to_restore: null         # Path to restore prior training
   restore_from_run_state: null        # Path to restore full training state
 
   # Data splitting
-  train_test_split_info: null
   train_subset_ratio: 0.8
 
   # Evaluation and resets
   eval_every: 20_000_000
-  episode_length: 200
   reset_every: 20_000_000
 
   # ---------------------------------------------------------------------------
@@ -200,8 +195,8 @@ train_setup:
 # Logging Configuration
 # =============================================================================
 logging_config:
-  project_name: vnl_debug
-  group_name: prior_frozen_encoder_decoder
+  project_name: SCAMPER
+  group_name: prior
   exp_name: null
   clip_id: -1
   model_path: /home/mila/a/aidan.sirbu/scratch/scamper/model_checkpoints
@@ -214,65 +209,3 @@ walker_config:
   walker_name: "rodent"
   torque_actuators: true
   rescale_factor: 0.9
-
-  joint_names:
-    - vertebra_1_extend
-    - hip_L_supinate
-    - hip_L_abduct
-    - hip_L_extend
-    - knee_L
-    - ankle_L
-    - toe_L
-    - hip_R_supinate
-    - hip_R_abduct
-    - hip_R_extend
-    - knee_R
-    - ankle_R
-    - toe_R
-    - vertebra_C11_extend
-    - vertebra_cervical_1_bend
-    - vertebra_axis_twist
-    - atlas
-    - mandible
-    - scapula_L_supinate
-    - scapula_L_abduct
-    - scapula_L_extend
-    - shoulder_L
-    - shoulder_sup_L
-    - elbow_L
-    - wrist_L
-    - scapula_R_supinate
-    - scapula_R_abduct
-    - scapula_R_extend
-    - shoulder_R
-    - shoulder_sup_R
-    - elbow_R
-    - wrist_R
-    - finger_R
-
-  body_names:
-    - torso
-    - pelvis
-    - upper_leg_L
-    - lower_leg_L
-    - foot_L
-    - upper_leg_R
-    - lower_leg_R
-    - foot_R
-    - skull
-    - jaw
-    - scapula_L
-    - upper_arm_L
-    - lower_arm_L
-    - finger_L
-    - scapula_R
-    - upper_arm_R
-    - lower_arm_R
-    - finger_R
-
-  end_eff_names:
-    - foot_L
-    - foot_R
-    - hand_L
-    - hand_R
-    - skull

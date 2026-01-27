@@ -203,7 +203,7 @@ train_setup:
 logging_config:
   project_name: SCAMPER
   group_name: imitation
-  exp_name:
+  exp_name: null
   clip_id: -1                         # Clip ID for single-clip runs (-1 = all)
   model_path: model_checkpoints/
 

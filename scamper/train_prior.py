@@ -6,8 +6,10 @@ and start prior training with KL loss.
 
 import os
 
+# Must set rendering backend before importing MuJoCo
 os.environ["MUJOCO_GL"] = "egl"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import functools
 import logging
@@ -18,16 +20,16 @@ import orbax.checkpoint as ocp
 import wandb
 from mujoco_playground import wrapper as playground_wrappers
 from omegaconf import DictConfig, OmegaConf
-from vnl_playground import registry
 from vnl_playground.tasks.reference_clips import ReferenceClips
+from vnl_playground.tasks.rodent import imitation
 
 from scamper.agent import checkpointing
 from scamper.agent import wandb_logging
-from scamper.config import utils
 from scamper.agent.domain_randomization import domain_randomization_maker
-from scamper.agent.mlp_prior.rollout_logging import prior_training_rollout_logging_fn
-from scamper.agent.mlp_prior import prior_train
 from scamper.agent.mlp_prior import prior_networks
+from scamper.agent.mlp_prior import prior_train
+from scamper.agent.mlp_prior.rollout_logging import prior_training_rollout_logging_fn
+from scamper.config import utils
 
 
 def _setup_environment() -> None:
@@ -36,83 +38,6 @@ def _setup_environment() -> None:
     xla_flags += " --xla_gpu_triton_gemm_any=True"
     os.environ["XLA_FLAGS"] = xla_flags
     os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-
-
-def _load_from_run_state_prior(cfg: DictConfig) -> tuple:
-    """Load or create run state for prior training, handling preemption and manual restoration.
-
-    Similar to checkpointing.load_from_run_state but uses PriorNetwork step prefix.
-
-    Args:
-        cfg: Current configuration.
-
-    Returns:
-        Tuple of (run_id, checkpoint_path, existing_run_state).
-    """
-    from datetime import datetime
-    from pathlib import Path
-
-    # Check for existing run state
-    existing_run_state = checkpointing.discover_existing_run_state(cfg)
-
-    if existing_run_state:
-        run_id = existing_run_state["run_id"]
-        checkpoint_path = existing_run_state["checkpoint_path"]
-        logging.info(f"Resuming from existing run: {run_id}")
-        cfg.train_setup.checkpoint_to_restore = checkpoint_path
-    elif cfg.train_setup.restore_from_run_state:
-        import fcntl
-        import json
-
-        base_path = Path(cfg.logging_config.model_path).resolve()
-        full_path = base_path / cfg.train_setup.restore_from_run_state
-
-        with open(full_path, "r") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-            existing_run_state = json.load(f)
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-        run_id = existing_run_state["run_id"]
-        checkpoint_path = existing_run_state["checkpoint_path"]
-        logging.info(f"Restoring from specified run state: {run_id}")
-        cfg.train_setup.checkpoint_to_restore = checkpoint_path
-    else:
-        run_id = datetime.now().strftime("%y%m%d_%H%M%S_%f")
-        model_path = Path(cfg.logging_config.model_path)
-        if not model_path.is_absolute():
-            model_path = Path.cwd() / model_path
-        checkpoint_path = str(model_path / run_id)
-
-    # If restoring from checkpoint, load the config
-    if cfg.train_setup.checkpoint_to_restore is not None:
-        from omegaconf import OmegaConf
-
-        checkpoint_to_restore = cfg.train_setup.checkpoint_to_restore
-        submitted_timesteps = cfg.train_setup.train_config.num_timesteps
-
-        # Load checkpoint config with PriorNetwork prefix
-        cfg = OmegaConf.create(
-            checkpointing.load_config_from_checkpoint(
-                checkpoint_to_restore, step_prefix="PriorNetwork"
-            )
-        )
-        cfg.train_setup.checkpoint_to_restore = checkpoint_to_restore
-
-        # Allow overriding num_timesteps to extend training
-        restored_timesteps = cfg.train_setup.train_config.num_timesteps
-        if submitted_timesteps != restored_timesteps:
-            logging.info(
-                f"Updating num_timesteps: {restored_timesteps} -> {submitted_timesteps}"
-            )
-            cfg.train_setup.train_config.num_timesteps = submitted_timesteps
-
-        checkpoint_path = checkpoint_to_restore
-        run_id = os.path.basename(checkpoint_path)
-
-    logging.info(f"Run ID: {run_id}")
-    logging.info(f"Training checkpoint path: {checkpoint_path}")
-
-    return (run_id, checkpoint_path, existing_run_state)
 
 
 @hydra.main(version_base=None, config_path="config", config_name="rodent-prior")
@@ -124,7 +49,7 @@ def main(cfg: DictConfig):
     try:
         n_devices = jax.device_count(backend="gpu")
         logging.info(f"Using {n_devices} GPUs")
-    except:
+    except RuntimeError:
         n_devices = 1
         logging.info("Not using GPUs")
 
@@ -138,7 +63,7 @@ def main(cfg: DictConfig):
     cfg, cfg_dict, env_cfg_ml = utils.prepare_config(cfg)
 
     # Determine how to load from checkpoint
-    run_id, checkpoint_path, existing_run_state = _load_from_run_state_prior(cfg)
+    run_id, checkpoint_path, existing_run_state = checkpointing.load_from_run_state_prior(cfg)
 
     # Initialize checkpoint manager with PriorNetwork prefix
     mgr_options = ocp.CheckpointManagerOptions(
