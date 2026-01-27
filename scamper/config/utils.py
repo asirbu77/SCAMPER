@@ -94,10 +94,16 @@ def prepare_config(
         NotImplementedError: If the specified walker is not yet fully implemented.
     """
     walker_name = cfg.walker_config.walker_name
+    xml_variant = cfg.walker_config.get("xml_variant", "limited-collisions")
 
     if walker_name == "rodent":
         logging.info("Using rodent walker")
-        walker_xml_path = str(rodent_consts.RODENT_XML_PATH)
+        if xml_variant == "limited-collisions":
+            walker_xml_path = str(rodent_consts.RODENT_XML_PATH)
+        elif xml_variant == "full-collisions":
+            walker_xml_path = str(rodent_consts.RODENT_FULL_COLLISION_XML)
+        else:
+            raise ValueError(f"Unknown xml_variant: {xml_variant}")
         arena_xml_path = str(rodent_consts.ARENA_XML_PATH)
         reference_data_path = _resolve_data_path(
             "data/rodent/rodent_reference_clips.h5"
