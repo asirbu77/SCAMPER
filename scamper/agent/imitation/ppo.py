@@ -442,8 +442,7 @@ def train(
             params=params,
             normalizer_params=normalizer_params,
             env_steps=jnp.int32(
-                training_state.env_steps
-                + env_step_per_training_step / 1e3
+                training_state.env_steps + env_step_per_training_step / 1e3
             ),  # env step in thousands
         )
         return (new_training_state, state, new_key, it), metrics

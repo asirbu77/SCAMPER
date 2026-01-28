@@ -20,7 +20,10 @@ from vnl_playground import registry
 
 from scamper.config import utils
 from scamper.agent import checkpointing, wandb_logging
-from scamper.agent.imitation import ppo as imitation_ppo, ppo_networks as imitation_networks
+from scamper.agent.imitation import (
+    ppo as imitation_ppo,
+    ppo_networks as imitation_networks,
+)
 from scamper.agent.domain_randomization import domain_randomization_maker
 
 
