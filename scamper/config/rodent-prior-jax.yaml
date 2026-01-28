@@ -32,8 +32,8 @@ env_config:
   solver: "newton"
   iterations: 5
   ls_iterations: 5
-  naconmax: 24576         # num_envs * 12
-  njmax: 128
+  naconmax: 45000
+  njmax: 1000
   noslip_iterations: 0
 
   # -----------------------------------------------------------------------------
@@ -147,7 +147,7 @@ network_config:
 # =============================================================================
 # Loss weights and settings for prior training (KL loss only)
 prior_config:
-  kl_weight: 1e-3                     # Weight for KL divergence loss
+  kl_weight: 1                        # Weight for KL divergence loss
   grad_clip_norm: 10.0                # Gradient clipping norm
 
   # ---------------------------------------------------------------------------
