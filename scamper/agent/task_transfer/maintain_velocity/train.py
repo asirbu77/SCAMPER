@@ -102,6 +102,7 @@ def main(cfg: DictConfig) -> None:
     # Create environment config
     env_cfg = maintain_velocity.default_config()
     env_cfg.ctrl_dt = ckpt_cfg["env_config"]["ctrl_dt"]
+    env_cfg.init_z = cfg.env.init_z
     env_cfg.target_speed = cfg.env.target_speed
     # Set reward term weights
     env_cfg.reward_terms = {
