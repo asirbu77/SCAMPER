@@ -199,7 +199,7 @@ logging_config:
   group_name: prior
   exp_name: null
   clip_id: -1
-  model_path: /home/mila/a/aidan.sirbu/scratch/scamper/model_checkpoints
+  model_path: null
 
 # =============================================================================
 # Walker Configuration
