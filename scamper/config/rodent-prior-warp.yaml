@@ -207,5 +207,6 @@ logging_config:
 # Rodent morphology and actuator settings (same as distillation)
 walker_config:
   walker_name: "rodent"
+  xml_variant: "full-collisions"      # 'full-collisions' or 'limited-collisions'
   torque_actuators: true
   rescale_factor: 0.9
