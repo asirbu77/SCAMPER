@@ -21,6 +21,7 @@ dependencies = [
     "orbax-checkpoint",
     # MuJoCo
     "mujoco-mjx[warp]>=3.4.0",
+    "mujoco==3.4.1.dev862755621",
     # Rendering (EGL/osmesa support)
     "PyOpenGL==3.1.9",
     # Data & ML utilities
