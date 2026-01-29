@@ -195,12 +195,29 @@ def fix_config_paths(
     Returns:
         Updated configuration.
     """
-    OLD_PATH_PREFIX = "/tmp/scamper"
-    NEW_PATH_PREFIX = str(Path(__file__).parent.parent.parent)
+    PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
 
     def fix_path(path_str):
-        if path_str and path_str.startswith(OLD_PATH_PREFIX):
-            return path_str.replace(OLD_PATH_PREFIX, NEW_PATH_PREFIX, 1)
+        if not path_str:
+            return path_str
+
+        # Paths containing vnl_playground/ resolve via the current installation
+        VNL_MARKER = "vnl_playground/"
+        if VNL_MARKER in path_str:
+            import vnl_playground
+
+            vnl_root = str(Path(vnl_playground.__file__).parent)
+            rel_path = path_str[path_str.index(VNL_MARKER) + len(VNL_MARKER) :]
+            return os.path.join(vnl_root, rel_path)
+
+        # Any /tmp/<project>/... path: strip the prefix and resolve relative
+        # to the current project root (handles /tmp/scamper, /tmp/track-mjx, etc.)
+        if path_str.startswith("/tmp/"):
+            parts = path_str.split("/")
+            if len(parts) > 3:
+                rest = "/".join(parts[3:])
+                return os.path.join(PROJECT_ROOT, rest)
+
         return path_str
 
     OmegaConf.set_struct(cfg.env_config, False)
