@@ -63,6 +63,7 @@ train:
 # Environment settings
 env:
   xml_variant: "limited-collisions"  # 'full-collisions' or 'limited-collisions'
+  mujoco_impl: "jax"  # 'jax' or 'warp'
   init_z: 0.0
   target_speed: 0.5
   # Reward term weights

@@ -112,6 +112,9 @@ def main(cfg: DictConfig) -> None:
     else:
         raise ValueError(f"Unknown xml_variant: {xml_variant}")
     logging.info(f"Using xml_variant: {xml_variant}")
+    # Resolve MuJoCo backend from config
+    env_cfg.mujoco_impl = cfg.env.get("mujoco_impl", "jax")
+    logging.info(f"Using mujoco_impl: {env_cfg.mujoco_impl}")
     env_cfg.ctrl_dt = ckpt_cfg["env_config"]["ctrl_dt"]
     env_cfg.target_speed = cfg.env.target_speed
     # Set reward term weights
