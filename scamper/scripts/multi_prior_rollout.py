@@ -44,7 +44,7 @@ from brax.training import distribution
 from brax.training.acme import running_statistics
 
 from vnl_playground.tasks.rodent import imitation
-from vnl_playground.tasks.rodent.reference_clips import ReferenceClips
+from vnl_playground.tasks.reference_clips import ReferenceClips
 
 from scamper.agent.mlp_prior import prior_networks
 from scamper.agent.mlp_prior.prior_rollout_eval import (
