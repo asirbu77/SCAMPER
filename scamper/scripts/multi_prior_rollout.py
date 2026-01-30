@@ -175,20 +175,6 @@ def parse_args() -> argparse.Namespace:
         "Set to 0 to skip rendering, or -1 to render all.",
     )
 
-    # Path fixing (for checkpoints saved on different machines)
-    parser.add_argument(
-        "--old-path-prefix",
-        type=str,
-        default="/tmp/scamper",
-        help="Old path prefix to replace in checkpoint config",
-    )
-    parser.add_argument(
-        "--new-path-prefix",
-        type=str,
-        default="/home/mila/a/aidan.sirbu/scamper",
-        help="New path prefix for checkpoint config",
-    )
-
     # Random seed
     parser.add_argument(
         "--seed",
@@ -235,12 +221,31 @@ def load_checkpoint(checkpoint_path: str, step: Optional[int] = None):
     return cfg, policy, step
 
 
-def fix_paths(cfg, old_prefix: str, new_prefix: str):
+def fix_paths(cfg):
     """Fix paths in config."""
+    PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
 
     def fix_path(path_str):
-        if path_str and path_str.startswith(old_prefix):
-            return path_str.replace(old_prefix, new_prefix, 1)
+        if not path_str:
+            return path_str
+
+        # Paths containing vnl_playground/ resolve via the current installation
+        VNL_MARKER = "vnl_playground/"
+        if VNL_MARKER in path_str:
+            import vnl_playground
+
+            vnl_root = str(Path(vnl_playground.__file__).parent)
+            rel_path = path_str[path_str.index(VNL_MARKER) + len(VNL_MARKER) :]
+            return os.path.join(vnl_root, rel_path)
+
+        # Any /tmp/<project>/... path: strip the prefix and resolve relative
+        # to the current project root (handles /tmp/scamper, /tmp/track-mjx, etc.)
+        if path_str.startswith("/tmp/"):
+            parts = path_str.split("/")
+            if len(parts) > 3:
+                rest = "/".join(parts[3:])
+                return os.path.join(PROJECT_ROOT, rest)
+
         return path_str
 
     OmegaConf.set_struct(cfg.env_config, False)
@@ -484,7 +489,7 @@ def main():
     )
 
     # Fix paths
-    cfg = fix_paths(cfg, args.old_path_prefix, args.new_path_prefix)
+    cfg = fix_paths(cfg)
 
     # Create environment
     env = create_environment(cfg)
