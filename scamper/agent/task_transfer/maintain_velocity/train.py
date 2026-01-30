@@ -39,6 +39,7 @@ from brax.training.acme import running_statistics
 from mujoco_playground import wrapper
 from omegaconf import DictConfig, OmegaConf
 
+from vnl_playground.tasks.rodent import consts as rodent_consts
 from vnl_playground.tasks.rodent import maintain_velocity
 
 from scamper.agent.task_transfer.maintain_velocity.checkpoint_utils import (
@@ -101,6 +102,15 @@ def main(cfg: DictConfig) -> None:
 
     # Create environment config
     env_cfg = maintain_velocity.default_config()
+    # Resolve XML variant from config
+    xml_variant = cfg.env.get("xml_variant", "full-collisions")
+    if xml_variant == "limited-collisions":
+        env_cfg.walker_xml_path = str(rodent_consts.RODENT_XML_PATH)
+    elif xml_variant == "full-collisions":
+        env_cfg.walker_xml_path = str(rodent_consts.RODENT_FULL_COLLISION_XML)
+    else:
+        raise ValueError(f"Unknown xml_variant: {xml_variant}")
+    logging.info(f"Using xml_variant: {xml_variant}")
     env_cfg.ctrl_dt = ckpt_cfg["env_config"]["ctrl_dt"]
     env_cfg.init_z = cfg.env.init_z
     env_cfg.target_speed = cfg.env.target_speed
