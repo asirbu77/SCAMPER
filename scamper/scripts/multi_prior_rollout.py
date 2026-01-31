@@ -183,6 +183,15 @@ def parse_args() -> argparse.Namespace:
         help="Random seed",
     )
 
+    # Memory management
+    parser.add_argument(
+        "--rollout-chunk-size",
+        type=int,
+        default=None,
+        help="Max rollouts to vmap simultaneously (for GPU memory management). "
+        "If None, all rollouts run at once. Try 25 or 50 if OOMing.",
+    )
+
     return parser.parse_args()
 
 
@@ -663,18 +672,56 @@ def main():
                 # Generate rollout keys
                 rollout_keys = random.split(rng_rollout, num_rollouts)
 
-                # Run rollouts
+                # Chunk rollouts to manage GPU memory
+                chunk_size = args.rollout_chunk_size or num_rollouts
+                num_chunks = (num_rollouts + chunk_size - 1) // chunk_size
+
                 t_start = time.time()
-                step_counts, terminated_flags, all_states = vmapped_rollout(
-                    rollout_keys
-                )
-                step_counts = jnp.array(step_counts)
-                step_counts.block_until_ready()
+                all_step_counts = []
+                all_terminated = []
+                all_qpos = []
+                all_qvel = []
+                render_states = None  # Keep first chunk on GPU for rendering
+
+                for chunk_idx in range(num_chunks):
+                    chunk_start = chunk_idx * chunk_size
+                    chunk_end = min(chunk_start + chunk_size, num_rollouts)
+                    chunk_keys = rollout_keys[chunk_start:chunk_end]
+
+                    sc, tf, states = vmapped_rollout(chunk_keys)
+                    sc.block_until_ready()
+
+                    # Move to CPU immediately to free GPU memory
+                    all_step_counts.append(np.array(sc))
+                    all_terminated.append(np.array(tf))
+                    all_qpos.append(np.array(states.data.qpos))
+                    all_qvel.append(np.array(states.data.qvel))
+
+                    # Keep first chunk states on GPU for rendering
+                    if chunk_idx == 0:
+                        render_states = states
+                    else:
+                        del states
+
+                    if num_chunks > 1:
+                        print(
+                            f"      Chunk {chunk_idx + 1}/{num_chunks} done "
+                            f"({chunk_end - chunk_start} rollouts)"
+                        )
+
+                step_counts_np = np.concatenate(all_step_counts, axis=0)
+                terminated_np = np.concatenate(all_terminated, axis=0)
+                qpos_data = np.concatenate(all_qpos, axis=0)
+                qvel_data = np.concatenate(all_qvel, axis=0)
+
+                # Free chunk lists
+                del all_step_counts, all_terminated, all_qpos, all_qvel
+
                 t_elapsed = time.time() - t_start
 
                 print(f"    Rollouts: {num_rollouts}, Time: {t_elapsed:.2f}s")
                 print(
-                    f"    Steps: {int(step_counts[0])} (terminated: {bool(terminated_flags[0])})"
+                    f"    Steps: {int(step_counts_np[0])} (terminated: {bool(terminated_np[0])})"
                 )
 
                 # Create H5 subgroup for this pose
@@ -687,11 +734,6 @@ def main():
 
                 # Save rollout data to H5
                 # Shape: (num_rollouts, max_steps, dim)
-                qpos_data = np.array(all_states.data.qpos)
-                qvel_data = np.array(all_states.data.qvel)
-                step_counts_np = np.array(step_counts)
-                terminated_np = np.array(terminated_flags)
-
                 pose_grp.create_dataset("qpos", data=qpos_data, compression="gzip")
                 pose_grp.create_dataset("qvel", data=qvel_data, compression="gzip")
                 pose_grp.create_dataset("step_counts", data=step_counts_np)
@@ -706,9 +748,12 @@ def main():
                 else:
                     num_to_render = min(args.num_rollouts_to_render, num_rollouts)
 
+                # Rendering uses first chunk's states (on GPU)
+                num_to_render = min(num_to_render, chunk_size)
+
                 for rollout_idx in range(num_to_render):
                     rollout_states = jax.tree_util.tree_map(
-                        lambda x: x[rollout_idx], all_states
+                        lambda x: x[rollout_idx], render_states
                     )
                     frames = render_rollout(
                         env=env,
@@ -729,6 +774,9 @@ def main():
                         for frame in frames:
                             writer.append_data(frame)
                     print(f"    Saved: {video_filename}")
+
+                # Free GPU memory from render states
+                del render_states
 
                 # Store results summary
                 all_results[var_name][pose_name] = {
