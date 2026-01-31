@@ -102,6 +102,8 @@ def prepare_config(
             walker_xml_path = str(rodent_consts.RODENT_XML_PATH)
         elif xml_variant == "full-collisions":
             walker_xml_path = str(rodent_consts.RODENT_FULL_COLLISION_XML)
+        elif xml_variant == "no-tail-collisions":
+            walker_xml_path = str(rodent_consts.RODENT_NO_TAIL_COLLISION_XML)
         else:
             raise ValueError(f"Unknown xml_variant: {xml_variant}")
         arena_xml_path = str(rodent_consts.ARENA_XML_PATH)
