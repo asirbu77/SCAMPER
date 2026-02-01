@@ -65,7 +65,7 @@ train:
 
 # Environment settings
 env:
-  xml_variant: "limited-collisions"  # 'full-collisions' or 'limited-collisions'
+  xml_variant: "limited-collisions"  # 'full-collisions', 'limited-collisions', or 'no-tail-collisions'
   mujoco_impl: "jax"  # 'jax' or 'warp'
   target_speed: 1.0
   # Sliding friction for bowl heightfield (MuJoCo default is 1.0, rodent paws have 1.5)

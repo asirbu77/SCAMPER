@@ -110,6 +110,8 @@ def main(cfg: DictConfig) -> None:
         env_cfg.walker_xml_path = rodent_consts.RODENT_XML_PATH
     elif xml_variant == "full-collisions":
         env_cfg.walker_xml_path = rodent_consts.RODENT_FULL_COLLISION_XML
+    elif xml_variant == "no-tail-collisions":
+        env_cfg.walker_xml_path = rodent_consts.RODENT_NO_TAIL_COLLISION_XML
     else:
         raise ValueError(f"Unknown xml_variant: {xml_variant}")
     logging.info(f"Using xml_variant: {xml_variant}")
