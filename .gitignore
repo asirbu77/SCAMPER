@@ -17,6 +17,9 @@ __pycache__/
 # sbatch scripts
 sbatch/
 
+# Claude
+CLAUDE.md
+
 # slurm output folder
 slurm_outputs/
 
