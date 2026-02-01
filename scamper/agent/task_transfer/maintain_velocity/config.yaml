@@ -62,7 +62,7 @@ train:
 
 # Environment settings
 env:
-  xml_variant: "limited-collisions"  # 'full-collisions' or 'limited-collisions'
+  xml_variant: "limited-collisions"  # 'full-collisions', 'limited-collisions', or 'no-tail-collisions'
   mujoco_impl: "jax"  # 'jax' or 'warp'
   init_z: 0.0
   target_speed: 0.5
