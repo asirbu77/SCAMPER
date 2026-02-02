@@ -223,6 +223,19 @@ def parse_args() -> argparse.Namespace:
         help="Exclude joints that are always zero",
     )
 
+    # Baseline configuration
+    parser.add_argument(
+        "--num-baseline-runs",
+        type=int,
+        default=3,
+        help="Number of runs per baseline condition per window size",
+    )
+    parser.add_argument(
+        "--skip-baselines",
+        action="store_true",
+        help="Skip baseline runs (real-vs-real and shuffled labels)",
+    )
+
     return parser.parse_args()
 
 
@@ -266,6 +279,8 @@ def train_discriminator(
     rnn_num_layers: int = 2,
     rnn_bidirectional: bool = True,
     attention_hidden_size: int = 64,
+    shuffle_labels: bool = False,
+    shuffle_seed: int = 0,
 ) -> Dict[str, List]:
     """Train a discriminator and return the training history."""
 
@@ -281,6 +296,16 @@ def train_discriminator(
             )
         real_data = real_data[:, :clip_length, :]
         fake_data = fake_data[:, :clip_length, :]
+
+    # Shuffle labels if requested (combine real+fake and randomly reassign)
+    if shuffle_labels:
+        combined = np.concatenate([real_data, fake_data], axis=0)
+        shuffle_rng = np.random.default_rng(shuffle_seed)
+        perm = shuffle_rng.permutation(len(combined))
+        combined = combined[perm]
+        n = len(combined) // 2
+        real_data = combined[:n]
+        fake_data = combined[n:]
 
     # Validate window size if provided
     if window_size is not None:
@@ -459,6 +484,7 @@ def save_plot_data_csv(
     results: Dict[str, Dict[int, Dict]],
     window_sizes: List[int],
     output_path: str,
+    baseline_bounds: Dict[int, Dict[str, float]] = None,
 ) -> None:
     """Save the plot data as a CSV file.
 
@@ -475,6 +501,8 @@ def save_plot_data_csv(
 
         # Header row
         header = ["window_size"]
+        if baseline_bounds is not None:
+            header.extend(["baseline_min", "baseline_max"])
         for ds in fake_datasets:
             short_name = ds.replace("_qpos", "").replace("prior_", "")
             header.extend([f"{short_name}_mean", f"{short_name}_std"])
@@ -483,6 +511,9 @@ def save_plot_data_csv(
         # Data rows
         for ws in window_sizes_sorted:
             row = [ws]
+            if baseline_bounds is not None:
+                row.append(baseline_bounds[ws]["min"])
+                row.append(baseline_bounds[ws]["max"])
             for ds in fake_datasets:
                 row.append(results[ds][ws]["last_50_mean"])
                 row.append(results[ds][ws]["last_50_std"])
@@ -497,6 +528,7 @@ def create_plot(
     real_dataset: str,
     clip_length: int,
     output_path: str,
+    baseline_bounds: Dict[int, Dict[str, float]] = None,
 ) -> None:
     """Create and save the comparison plot."""
     fig, ax = plt.subplots(figsize=(14, 8))
@@ -505,6 +537,19 @@ def create_plot(
     colors = plt.cm.tab10(np.linspace(0, 1, len(results)))
 
     window_sizes_arr = np.array(sorted(window_sizes))
+
+    # Draw baseline noise floor if available
+    if baseline_bounds is not None:
+        bl_mins = np.array([baseline_bounds[ws]["min"] for ws in window_sizes_arr])
+        bl_maxs = np.array([baseline_bounds[ws]["max"] for ws in window_sizes_arr])
+        ax.fill_between(
+            window_sizes_arr,
+            bl_mins,
+            bl_maxs,
+            color="gray",
+            alpha=0.25,
+            label="Noise floor (baselines)",
+        )
 
     for idx, (fake_ds, ws_results) in enumerate(results.items()):
         means = np.array([ws_results[ws]["last_50_mean"] for ws in window_sizes_arr])
@@ -604,16 +649,161 @@ def main():
         print(f"  Attention hidden size: {args.attention_hidden_size}")
     print(f"Dropout rate: {args.dropout_rate}")
     total_runs = len(args.fake_datasets) * len(args.window_sizes)
+    if not args.skip_baselines:
+        real_vs_real_runs = len(args.window_sizes) * args.num_baseline_runs
+        shuffled_runs = (
+            len(args.fake_datasets) * len(args.window_sizes) * args.num_baseline_runs
+        )
+        total_baseline_runs = real_vs_real_runs + shuffled_runs
+        print(
+            f"Baseline runs: {total_baseline_runs} "
+            f"({real_vs_real_runs} real-vs-real + {shuffled_runs} shuffled)"
+        )
     print(
-        f"Total training runs: {len(args.fake_datasets)} x {len(args.window_sizes)} = {total_runs}"
+        f"Main training runs: {len(args.fake_datasets)} x {len(args.window_sizes)} = {total_runs}"
     )
     print("=" * 70)
 
     # Initialize results
     results = {fake_ds: {} for fake_ds in args.fake_datasets}
 
-    run_count = 0
     start_time = time.time()
+
+    # === Baseline runs ===
+    baseline_bounds = None
+    if not args.skip_baselines:
+        baseline_real_vs_real = {ws: [] for ws in args.window_sizes}
+        baseline_shuffled = {ws: [] for ws in args.window_sizes}
+
+        # --- Real vs Real baseline ---
+        print(f"\n{'=' * 60}")
+        print("BASELINE: Real vs Real")
+        print("=" * 60)
+
+        total_rvr = len(args.window_sizes) * args.num_baseline_runs
+        rvr_count = 0
+
+        for ws in args.window_sizes:
+            for run_i in range(args.num_baseline_runs):
+                rvr_count += 1
+                print(
+                    f"  [{rvr_count}/{total_rvr}] Window: {ws}, "
+                    f"run {run_i + 1}/{args.num_baseline_runs}",
+                    end=" ",
+                    flush=True,
+                )
+
+                run_start = time.time()
+
+                hist = train_discriminator(
+                    real_dataset_name=args.real_dataset,
+                    fake_dataset_name=args.real_dataset,
+                    h5_path=args.h5_path,
+                    num_epochs=args.num_epochs,
+                    batch_size=args.batch_size,
+                    hidden_layer_sizes=tuple(args.hidden_layers),
+                    learning_rate=args.learning_rate,
+                    weight_decay=args.weight_decay,
+                    grad_clip_norm=args.grad_clip_norm,
+                    dropout_rate=args.dropout_rate,
+                    use_layer_norm=not args.no_layer_norm,
+                    train_ratio=args.train_ratio,
+                    split_seed=args.split_seed + run_i + 100,
+                    seed=args.seed + run_i + 100,
+                    exclude_root=args.exclude_root,
+                    exclude_zero_joints=args.exclude_zero_joints,
+                    window_size=ws,
+                    clip_length=args.clip_length,
+                    network_type=args.network_type,
+                    rnn_hidden_size=args.rnn_hidden_size,
+                    rnn_num_layers=args.rnn_num_layers,
+                    rnn_bidirectional=bidirectional,
+                    attention_hidden_size=args.attention_hidden_size,
+                )
+
+                test_accs = np.array(hist["test_accuracy"])
+                last_n = min(50, len(test_accs))
+                last_50_mean = float(np.mean(test_accs[-last_n:]))
+                baseline_real_vs_real[ws].append(last_50_mean)
+
+                run_time = time.time() - run_start
+                print(f"-> {last_50_mean:.4f} ({run_time:.1f}s)")
+
+        # --- Shuffled labels baseline ---
+        print(f"\n{'=' * 60}")
+        print("BASELINE: Shuffled Labels")
+        print("=" * 60)
+
+        total_shuf = (
+            len(args.fake_datasets) * len(args.window_sizes) * args.num_baseline_runs
+        )
+        shuf_count = 0
+
+        for fake_ds in args.fake_datasets:
+            for ws in args.window_sizes:
+                for run_i in range(args.num_baseline_runs):
+                    shuf_count += 1
+                    short_name = fake_ds.replace("_qpos", "").replace("prior_", "")
+                    print(
+                        f"  [{shuf_count}/{total_shuf}] {short_name} | "
+                        f"Window: {ws}, run {run_i + 1}/{args.num_baseline_runs}",
+                        end=" ",
+                        flush=True,
+                    )
+
+                    run_start = time.time()
+
+                    hist = train_discriminator(
+                        real_dataset_name=args.real_dataset,
+                        fake_dataset_name=fake_ds,
+                        h5_path=args.h5_path,
+                        num_epochs=args.num_epochs,
+                        batch_size=args.batch_size,
+                        hidden_layer_sizes=tuple(args.hidden_layers),
+                        learning_rate=args.learning_rate,
+                        weight_decay=args.weight_decay,
+                        grad_clip_norm=args.grad_clip_norm,
+                        dropout_rate=args.dropout_rate,
+                        use_layer_norm=not args.no_layer_norm,
+                        train_ratio=args.train_ratio,
+                        split_seed=args.split_seed,
+                        seed=args.seed + run_i + 200,
+                        exclude_root=args.exclude_root,
+                        exclude_zero_joints=args.exclude_zero_joints,
+                        window_size=ws,
+                        clip_length=args.clip_length,
+                        network_type=args.network_type,
+                        rnn_hidden_size=args.rnn_hidden_size,
+                        rnn_num_layers=args.rnn_num_layers,
+                        rnn_bidirectional=bidirectional,
+                        attention_hidden_size=args.attention_hidden_size,
+                        shuffle_labels=True,
+                        shuffle_seed=args.seed + run_i + 200,
+                    )
+
+                    test_accs = np.array(hist["test_accuracy"])
+                    last_n = min(50, len(test_accs))
+                    last_50_mean = float(np.mean(test_accs[-last_n:]))
+                    baseline_shuffled[ws].append(last_50_mean)
+
+                    run_time = time.time() - run_start
+                    print(f"-> {last_50_mean:.4f} ({run_time:.1f}s)")
+
+        # Aggregate baseline bounds
+        baseline_bounds = {}
+        for ws in args.window_sizes:
+            all_vals = baseline_real_vs_real[ws] + baseline_shuffled[ws]
+            baseline_bounds[ws] = {
+                "min": float(np.min(all_vals)),
+                "max": float(np.max(all_vals)),
+                "real_vs_real": baseline_real_vs_real[ws],
+                "shuffled": baseline_shuffled[ws],
+            }
+
+        print(f"\nBaseline bounds computed for {len(args.window_sizes)} window sizes")
+
+    # === Main training runs ===
+    run_count = 0
 
     for fake_ds in args.fake_datasets:
         print(f"\n{'=' * 60}")
@@ -697,6 +887,8 @@ def main():
         "network_type": args.network_type,
         "timestamp": datetime.now().isoformat(),
         "total_time_seconds": total_time,
+        "num_baseline_runs": args.num_baseline_runs,
+        "skip_baselines": args.skip_baselines,
     }
     if args.network_type == "mlp":
         metadata["hidden_layers"] = args.hidden_layers
@@ -707,9 +899,23 @@ def main():
         metadata["rnn_bidirectional"] = bidirectional
         metadata["attention_hidden_size"] = args.attention_hidden_size
 
+    # Add baseline data to output
+    baseline_summary = None
+    if baseline_bounds is not None:
+        baseline_summary = {
+            str(ws): {
+                "min": data["min"],
+                "max": data["max"],
+                "real_vs_real": data["real_vs_real"],
+                "shuffled": data["shuffled"],
+            }
+            for ws, data in baseline_bounds.items()
+        }
+
     output_data = {
         "metadata": metadata,
         "results": results_summary,
+        "baselines": baseline_summary,
     }
 
     json_path = output_dir / "sweep_results.json"
@@ -725,6 +931,7 @@ def main():
         real_dataset=args.real_dataset,
         clip_length=args.clip_length,
         output_path=str(plot_path),
+        baseline_bounds=baseline_bounds,
     )
 
     # Save plot data as CSV
@@ -733,6 +940,7 @@ def main():
         results=results,
         window_sizes=args.window_sizes,
         output_path=str(csv_path),
+        baseline_bounds=baseline_bounds,
     )
 
     # Print summary table
@@ -743,6 +951,8 @@ def main():
 
     # Header
     header = f"{'Window':>8}"
+    if baseline_bounds is not None:
+        header += f" {'Noise Floor':>18}"
     for fake_ds in args.fake_datasets:
         short_name = fake_ds.replace("_qpos", "").replace("prior_", "")[:12]
         header += f" {short_name:>14}"
@@ -752,6 +962,10 @@ def main():
     # Data rows
     for ws in sorted(args.window_sizes):
         row = f"{ws:>8}"
+        if baseline_bounds is not None:
+            bl_min = baseline_bounds[ws]["min"]
+            bl_max = baseline_bounds[ws]["max"]
+            row += f" {bl_min:.4f}-{bl_max:.4f}  "
         for fake_ds in args.fake_datasets:
             mean = results[fake_ds][ws]["last_50_mean"]
             std = results[fake_ds][ws]["last_50_std"]
