@@ -126,14 +126,14 @@ def main(cfg: DictConfig) -> None:
         existing_run_state=existing_run_state,
     )
 
-    # Save initial run state after wandb initialization
-    if existing_run_state is None:
-        checkpointing.save_run_state(
-            cfg=cfg,
-            run_id=run_id,
-            checkpoint_path=checkpoint_path,
-            wandb_run_id=wandb.run.id,
-        )
+    # Save run state after wandb initialization (always, so the current job
+    # has a run state file even when restoring from a different job's state)
+    checkpointing.save_run_state(
+        cfg=cfg,
+        run_id=run_id,
+        checkpoint_path=checkpoint_path,
+        wandb_run_id=wandb.run.id,
+    )
 
     # Create the checkpoint callback with the correct wandb_run_id
     checkpoint_callback = checkpointing.create_checkpoint_callback(

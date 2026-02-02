@@ -442,7 +442,9 @@ def _read_json_with_lock(file_path: Path) -> dict[str, Any] | None:
         return None
 
 
-def discover_existing_run_state(cfg: DictConfig) -> dict[str, Any] | None:
+def discover_existing_run_state(
+    cfg: DictConfig, step_prefix: str = "PPONetwork"
+) -> dict[str, Any] | None:
     """Discover existing run state for preemption recovery.
 
     Looks for a run state file matching the current job/config combination,
@@ -450,6 +452,7 @@ def discover_existing_run_state(cfg: DictConfig) -> dict[str, Any] | None:
 
     Args:
         cfg: Current configuration.
+        step_prefix: Prefix used for checkpoint step directories.
 
     Returns:
         Run state dict with "latest_checkpoint_step" added if valid,
@@ -488,9 +491,7 @@ def discover_existing_run_state(cfg: DictConfig) -> dict[str, Any] | None:
     try:
         ckpt_mgr = ocp.CheckpointManager(
             checkpoint_path,
-            options=ocp.CheckpointManagerOptions(
-                create=False, step_prefix="PPONetwork"
-            ),
+            options=ocp.CheckpointManagerOptions(create=False, step_prefix=step_prefix),
         )
         latest_step = ckpt_mgr.latest_step()
         if latest_step is None:
@@ -605,9 +606,6 @@ def load_from_run_state(
     2. Manual restoration: Uses restore_from_run_state config path
     3. Fresh start: Creates new run_id and checkpoint path
 
-    If restoring, loads the checkpoint's config and optionally updates
-    num_timesteps from the submitted config.
-
     Args:
         cfg: Current configuration. May be modified to set checkpoint_to_restore.
 
@@ -647,23 +645,10 @@ def load_from_run_state(
             model_path = Path.cwd() / model_path
         checkpoint_path = str(model_path / run_id)
 
-    # If restoring from checkpoint, load and merge configs
+    # If restoring from checkpoint, resolve paths and set return values
     if cfg.train_setup.checkpoint_to_restore is not None:
         checkpoint_to_restore = _resolve_path(cfg.train_setup.checkpoint_to_restore)
-        submitted_timesteps = cfg.train_setup.train_config.num_timesteps
-
-        # Load checkpoint config
-        cfg = OmegaConf.create(load_config_from_checkpoint(checkpoint_to_restore))
         cfg.train_setup.checkpoint_to_restore = checkpoint_to_restore
-
-        # Allow overriding num_timesteps to extend training
-        restored_timesteps = cfg.train_setup.train_config.num_timesteps
-        if submitted_timesteps != restored_timesteps:
-            logging.info(
-                f"Updating num_timesteps: {restored_timesteps} -> {submitted_timesteps}"
-            )
-            cfg.train_setup.train_config.num_timesteps = submitted_timesteps
-
         checkpoint_path = checkpoint_to_restore
         run_id = os.path.basename(checkpoint_path)
 
@@ -702,7 +687,7 @@ def load_from_run_state_prior(
         Tuple of (run_id, checkpoint_path, existing_run_state).
     """
     # Check for existing run state
-    existing_run_state = discover_existing_run_state(cfg)
+    existing_run_state = discover_existing_run_state(cfg, step_prefix="PriorNetwork")
 
     if existing_run_state:
         run_id = existing_run_state["run_id"]
@@ -729,27 +714,10 @@ def load_from_run_state_prior(
             model_path = Path.cwd() / model_path
         checkpoint_path = str(model_path / run_id)
 
-    # If restoring from checkpoint, load the config
+    # If restoring from checkpoint, resolve paths and set return values
     if cfg.train_setup.checkpoint_to_restore is not None:
-        checkpoint_to_restore = cfg.train_setup.checkpoint_to_restore
-        submitted_timesteps = cfg.train_setup.train_config.num_timesteps
-
-        # Load checkpoint config with PriorNetwork prefix
-        cfg = OmegaConf.create(
-            load_config_from_checkpoint(
-                checkpoint_to_restore, step_prefix="PriorNetwork"
-            )
-        )
+        checkpoint_to_restore = _resolve_path(cfg.train_setup.checkpoint_to_restore)
         cfg.train_setup.checkpoint_to_restore = checkpoint_to_restore
-
-        # Allow overriding num_timesteps to extend training
-        restored_timesteps = cfg.train_setup.train_config.num_timesteps
-        if submitted_timesteps != restored_timesteps:
-            logging.info(
-                f"Updating num_timesteps: {restored_timesteps} -> {submitted_timesteps}"
-            )
-            cfg.train_setup.train_config.num_timesteps = submitted_timesteps
-
         checkpoint_path = checkpoint_to_restore
         run_id = os.path.basename(checkpoint_path)
 
