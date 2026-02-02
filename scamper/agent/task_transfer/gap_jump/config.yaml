@@ -1,0 +1,88 @@
+# Gap Jump Task Transfer Training Config
+#
+# Three training modes:
+#   decoder_only: Freeze decoder, train new encoder
+#   prior_decoder: Freeze prior + decoder, train residual encoder
+#   scratch: Train both policy and decoder from random initialization
+#
+# Usage:
+#   python -m scamper.agent.task_transfer.gap_jump.train mode=decoder_only
+#   python -m scamper.agent.task_transfer.gap_jump.train mode=prior_decoder
+#   python -m scamper.agent.task_transfer.gap_jump.train mode=scratch
+
+defaults:
+  - _self_
+
+# Training mode: "decoder_only", "prior_decoder", or "scratch"
+mode: "decoder_only"
+
+# Checkpoint to load (mlp_prior checkpoint)
+checkpoint:
+  path: "./model_checkpoints/YYMMDD_HHMMSS"  # Replace with your checkpoint
+  step: null  # null = latest
+
+# Mode-specific settings
+decoder_only:
+  _placeholder: true
+
+prior_decoder:
+  deterministic_prior: true
+  noise_logvar: -2.0
+
+scratch:
+  _placeholder: true
+
+# Network architecture
+network:
+  policy_layers: [1024, 512, 256]
+  value_layers: [1024, 512, 256]
+
+# Training parameters
+train:
+  num_timesteps: 2_000_000_000
+  episode_length: 2000
+  num_envs: 4096
+  batch_size: 1024
+  num_minibatches: 16
+  num_updates_per_batch: 4
+  learning_rate: 1e-4
+  entropy_cost: 1e-4
+  discounting: 0.99
+  clipping_epsilon: 0.2
+  gae_lambda: 0.95
+  max_grad_norm: 50.0
+  vf_loss_coefficient: 5.0
+  reward_scaling: 1.0
+  normalize_observations: true
+  unroll_length: 20
+  action_repeat: 1
+  seed: 0
+  eval_every: 15_000_000
+
+# Environment settings
+env:
+  xml_variant: "no-tail-collisions"
+  mujoco_impl: "jax"
+  target_speed: 0.5
+  hfield_friction: 1.0
+  # Gap terrain layout (explicit lists)
+  platform_widths: [1.0, 0.6, 0.7, 0.8]
+  gap_widths: [0.2, 0.25, 0.3, 0.35]
+  end_buffer: 1.0
+  platform_height: 0.15
+  # Termination
+  height_threshold: 0.03
+  # Reward term weights
+  reward_weights:
+    forward_velocity: 1.0
+
+# Logging settings
+logging:
+  project: "vnl-playground"
+  group_name: "gap_jump_transfer"
+  exp_name: "gap_jump_transfer"
+  render_camera: "close_profile-rodent"
+  render_fps: 50
+  render_height: 480
+  render_width: 640
+  render_every: 1
