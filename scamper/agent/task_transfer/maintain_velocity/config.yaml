@@ -75,7 +75,7 @@ env:
 # Checkpointing settings
 checkpointing:
   enabled: true
-  model_path: "./model_checkpoints"  # Base directory (run-specific subdir created under this)
+  model_path: "./scratch/maintain_velocity_checkpoints"  # Base directory (run_id subdir created under this)
   max_to_keep: 3
 
 # Logging settings

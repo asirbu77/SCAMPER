@@ -132,10 +132,8 @@ def main(cfg: DictConfig) -> None:
         )
     else:
         # --- Fresh start path ---
-        run_id = datetime.now().strftime("%y%m%d_%H%M%S")
-        model_path = hydra.utils.to_absolute_path(
-            f"{model_path_base}/maintain_velocity_transfer_{cfg.mode}_{run_id}"
-        )
+        run_id = datetime.now().strftime("%y%m%d_%H%M%S_%f")
+        model_path = hydra.utils.to_absolute_path(f"{model_path_base}/{run_id}")
         Path(model_path).mkdir(parents=True, exist_ok=True)
         wandb_run_id_to_resume = None
 
