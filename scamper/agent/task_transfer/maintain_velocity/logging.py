@@ -185,3 +185,27 @@ def wandb_progress(num_steps: int, metrics: dict[str, Any]) -> None:
     """
     metrics["num_steps"] = num_steps
     wandb.log(metrics)
+
+
+def make_wandb_progress_with_offset(
+    step_offset: int = 0,
+) -> Callable[[int, dict[str, Any]], None]:
+    """Create a wandb progress function with step offset for resume support.
+
+    When resuming from a checkpoint, Brax's internal step counter restarts
+    from 0. This wrapper adds the offset so W&B shows correct cumulative
+    step counts.
+
+    Args:
+        step_offset: Number of timesteps completed in previous runs.
+
+    Returns:
+        Progress function compatible with Brax's ``progress_fn`` callback.
+    """
+
+    def progress_fn(num_steps: int, metrics: dict[str, Any]) -> None:
+        adjusted_step = num_steps + step_offset
+        metrics["num_steps"] = adjusted_step
+        wandb.log(metrics)
+
+    return progress_fn
