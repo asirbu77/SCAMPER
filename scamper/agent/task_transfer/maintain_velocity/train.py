@@ -23,7 +23,7 @@ xla_flags = os.environ.get("XLA_FLAGS", "")
 xla_flags += " --xla_gpu_triton_gemm_any=True"
 os.environ["XLA_FLAGS"] = xla_flags
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"   
+os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
 import functools
 import json
