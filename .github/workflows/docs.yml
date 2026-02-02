@@ -24,7 +24,7 @@ jobs:
             miniforge-version: latest
             conda-solver: "libmamba"
             environment-file: environment.yml
-            activate-environment: track-mjx
+            activate-environment: scamper
 
       - name: Print environment info
         shell: bash -l {0}

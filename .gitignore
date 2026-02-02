@@ -1,4 +1,4 @@
-# track-mjx specific gitignore:
+# SCAMPER specific gitignore:
 data/
 model_checkpoints/
 wandb/
@@ -7,6 +7,7 @@ rollouts/
 patch.ipynb
 jax_cache/
 results/
+scratch
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -15,6 +16,9 @@ __pycache__/
 
 # sbatch scripts
 sbatch/
+
+# Claude
+CLAUDE.md
 
 # slurm output folder
 slurm_outputs/
