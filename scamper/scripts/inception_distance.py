@@ -190,9 +190,9 @@ def parse_args() -> argparse.Namespace:
         help="Random seeds for VAE training",
     )
     parser.add_argument(
-        "--exclude-root",
+        "--exclude-xy",
         action="store_true",
-        help="Exclude root position/orientation (first 7 qpos dims)",
+        help="Exclude XY position (first 2 qpos dims)",
     )
     parser.add_argument(
         "--exclude-zero-joints",
@@ -211,27 +211,27 @@ def parse_args() -> argparse.Namespace:
 
 def filter_joints(
     data: np.ndarray,
-    exclude_root: bool,
+    exclude_xy: bool,
     exclude_zero_joints: bool,
 ) -> np.ndarray:
-    """Filter qpos dimensions by excluding root and/or zero joints.
+    """Filter qpos dimensions by excluding XY position and/or zero joints.
 
     Args:
         data: Array of shape (..., qpos_dim) with last dim = 74.
-        exclude_root: If True, exclude first 7 dims (root pos + quat).
+        exclude_xy: If True, exclude first 2 dims (XY position).
         exclude_zero_joints: If True, exclude always-zero joints.
 
     Returns:
         Filtered array with reduced last dimension.
     """
-    if not exclude_root and not exclude_zero_joints:
+    if not exclude_xy and not exclude_zero_joints:
         return data
 
     all_indices = set(range(74))
     indices_to_exclude = set()
 
-    if exclude_root:
-        indices_to_exclude.update(range(7))
+    if exclude_xy:
+        indices_to_exclude.update(range(2))
     if exclude_zero_joints:
         indices_to_exclude.update(ZERO_JOINT_INDICES)
 
@@ -602,14 +602,14 @@ def main():
     print(f"Num epochs: {args.num_epochs}")
     print(f"Beta: {args.beta} (warmup: {args.beta_warmup_epochs} epochs)")
     print(f"Seeds: {args.seeds}")
-    print(f"Exclude root: {args.exclude_root}")
+    print(f"Exclude XY: {args.exclude_xy}")
     print(f"Exclude zero joints: {args.exclude_zero_joints}")
     print("=" * 70)
 
     # Load real dataset
     print(f"\nLoading real dataset: {args.real_dataset}")
     real_data = load_h5_dataset(args.h5_path, args.real_dataset)
-    real_data = filter_joints(real_data, args.exclude_root, args.exclude_zero_joints)
+    real_data = filter_joints(real_data, args.exclude_xy, args.exclude_zero_joints)
     print(f"  Shape: {real_data.shape}")
 
     # Load fake datasets
@@ -618,7 +618,7 @@ def main():
         print(f"Loading fake dataset: {fake_name}")
         fake_data = load_h5_dataset(args.h5_path, fake_name)
         fake_data = filter_joints(
-            fake_data, args.exclude_root, args.exclude_zero_joints
+            fake_data, args.exclude_xy, args.exclude_zero_joints
         )
         fake_datasets[fake_name] = fake_data
         print(f"  Shape: {fake_data.shape}")
@@ -773,7 +773,7 @@ def main():
             "dropout_rate": args.dropout_rate,
             "use_layer_norm": not args.no_layer_norm,
             "seeds": args.seeds,
-            "exclude_root": args.exclude_root,
+            "exclude_xy": args.exclude_xy,
             "exclude_zero_joints": args.exclude_zero_joints,
             "split_seed": args.split_seed,
             "timestamp": datetime.now().isoformat(),
