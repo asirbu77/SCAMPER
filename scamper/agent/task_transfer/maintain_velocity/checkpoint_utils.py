@@ -341,13 +341,52 @@ def get_run_state_file_path(cfg: DictConfig, model_path_base: str) -> Path:
     return base_path / f"run_state_{job_id}_{config_hash}.json"
 
 
+def _find_run_state_file(cfg: DictConfig, model_path_base: str) -> Path | None:
+    """Find a run state file for this config, tolerating SLURM job ID changes.
+
+    First checks for an exact match using the current job identifier. If not
+    found, searches for any run state file with the same config hash (handles
+    the common case where a job is manually resubmitted after wall-time
+    expiration and receives a new SLURM job ID).
+
+    Args:
+        cfg: Task transfer config.
+        model_path_base: Base directory for model checkpoints.
+
+    Returns:
+        Path to the run state file, or None if not found.
+    """
+    # Try exact match first (fast path for requeued jobs with same ID)
+    exact_path = get_run_state_file_path(cfg, model_path_base)
+    if exact_path.exists():
+        return exact_path
+
+    # Fall back to glob search by config hash (handles new job IDs)
+    config_hash = hash_task_transfer_config(cfg)
+    base_path = Path(model_path_base).resolve()
+    candidates = sorted(
+        base_path.glob(f"run_state_*_{config_hash}.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        logging.info(
+            f"Exact run state file not found, but found match "
+            f"from a previous job: {candidates[0].name}"
+        )
+        return candidates[0]
+
+    return None
+
+
 def discover_existing_run_state(
     cfg: DictConfig, model_path_base: str
 ) -> dict[str, Any] | None:
     """Discover existing run state for preemption recovery.
 
-    Searches for a run state file matching the current job/config, validates it,
-    and checks that the checkpoint directory is accessible with valid steps.
+    Searches for a run state file matching the current config (tolerating
+    SLURM job ID changes across resubmissions), validates it, and checks
+    that the checkpoint directory is accessible with valid steps.
 
     Args:
         cfg: Current task transfer config.
@@ -357,12 +396,15 @@ def discover_existing_run_state(
         Run state dict with ``latest_checkpoint_step`` added if valid,
         None if no valid run state is found.
     """
-    state_file_path = get_run_state_file_path(cfg, model_path_base)
-    logging.info(f"Looking for task transfer run state at: {state_file_path}")
+    state_file_path = _find_run_state_file(cfg, model_path_base)
+    if state_file_path is None:
+        logging.info("No existing run state found")
+        return None
+    logging.info(f"Found task transfer run state at: {state_file_path}")
 
     run_state = checkpointing.read_json_with_lock(state_file_path)
     if not run_state:
-        logging.info("No existing run state found")
+        logging.info("Run state file exists but could not be read")
         return None
 
     required_keys = ["run_id", "checkpoint_path", "wandb_run_id", "config_hash"]
@@ -384,13 +426,13 @@ def discover_existing_run_state(
         return None
 
     try:
-        mgr = ocp.CheckpointManager(
+        with ocp.CheckpointManager(
             str(checkpoint_path),
             options=ocp.CheckpointManagerOptions(
                 create=False, step_prefix=_STEP_PREFIX
             ),
-        )
-        latest = mgr.latest_step()
+        ) as mgr:
+            latest = mgr.latest_step()
         if latest is None:
             logging.warning("No valid checkpoints found in directory, ignoring")
             return None

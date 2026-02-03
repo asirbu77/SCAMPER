@@ -116,7 +116,9 @@ def main(cfg: DictConfig) -> None:
         model_path = existing_run_state["checkpoint_path"]
         wandb_run_id_to_resume = existing_run_state["wandb_run_id"]
 
-        ckpt_info = load_task_transfer_metadata(model_path)
+        ckpt_info = load_task_transfer_metadata(
+            model_path, step=existing_run_state["latest_checkpoint_step"]
+        )
         metadata = ckpt_info["training_metadata"]
 
         step_offset = metadata["completed_timesteps"]
