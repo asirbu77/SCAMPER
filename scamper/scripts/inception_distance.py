@@ -41,39 +41,6 @@ from scamper.analysis.discriminator.data_loading import (
 )
 from scamper.analysis.vae_network import make_vae_network
 
-# Indices of joints that are always zero in the rodent data
-ZERO_JOINT_INDICES = [
-    18,
-    24,
-    25,
-    26,
-    27,
-    28,
-    29,
-    30,
-    31,
-    32,
-    33,
-    34,
-    35,
-    36,
-    37,
-    38,
-    39,
-    40,
-    41,
-    42,
-    43,
-    44,
-    45,
-    46,
-    47,
-    48,
-    57,
-    65,
-    73,
-]
-
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
@@ -195,9 +162,9 @@ def parse_args() -> argparse.Namespace:
         help="Exclude XY position (first 2 qpos dims)",
     )
     parser.add_argument(
-        "--exclude-zero-joints",
+        "--handle-rotation",
         action="store_true",
-        help="Exclude joints that are always zero",
+        help="Convert root quaternion (indices 3-6) to yaw-removed 6D rotation",
     )
     parser.add_argument(
         "--split-seed",
@@ -209,34 +176,99 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def filter_joints(
-    data: np.ndarray,
-    exclude_xy: bool,
-    exclude_zero_joints: bool,
-) -> np.ndarray:
-    """Filter qpos dimensions by excluding XY position and/or zero joints.
+def quat_to_rotmat(q: np.ndarray) -> np.ndarray:
+    """Convert quaternion (w, x, y, z) to 3x3 rotation matrix.
 
     Args:
-        data: Array of shape (..., qpos_dim) with last dim = 74.
-        exclude_xy: If True, exclude first 2 dims (XY position).
-        exclude_zero_joints: If True, exclude always-zero joints.
+        q: Quaternion array of shape (..., 4) in MuJoCo (w, x, y, z) order.
 
     Returns:
-        Filtered array with reduced last dimension.
+        Rotation matrices of shape (..., 3, 3).
     """
-    if not exclude_xy and not exclude_zero_joints:
-        return data
+    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
 
-    all_indices = set(range(74))
-    indices_to_exclude = set()
+    r00 = 1.0 - 2.0 * (y * y + z * z)
+    r01 = 2.0 * (x * y - w * z)
+    r02 = 2.0 * (x * z + w * y)
+    r10 = 2.0 * (x * y + w * z)
+    r11 = 1.0 - 2.0 * (x * x + z * z)
+    r12 = 2.0 * (y * z - w * x)
+    r20 = 2.0 * (x * z - w * y)
+    r21 = 2.0 * (y * z + w * x)
+    r22 = 1.0 - 2.0 * (x * x + y * y)
+
+    return np.stack([r00, r01, r02, r10, r11, r12, r20, r21, r22], axis=-1).reshape(
+        q.shape[:-1] + (3, 3)
+    )
+
+
+def handle_rotation(data: np.ndarray) -> np.ndarray:
+    """Replace root quaternion with yaw-removed 6D rotation representation.
+
+    Extracts the root quaternion (indices 3-6), removes the yaw (heading)
+    component, converts to a 6D rotation representation (first two columns
+    of the rotation matrix), and reassembles the data.
+
+    Args:
+        data: Array of shape (..., 74) where indices 3-6 are the root
+            quaternion in MuJoCo (w, x, y, z) order.
+
+    Returns:
+        Array of shape (..., 76) with quaternion replaced by 6D rotation.
+    """
+    quat = data[..., 3:7]
+    R = quat_to_rotmat(quat)
+
+    # Extract heading (yaw) angle from rotation matrix
+    heading = np.arctan2(R[..., 1, 0], R[..., 0, 0])
+
+    # Build inverse yaw rotation matrix
+    cos_h = np.cos(-heading)
+    sin_h = np.sin(-heading)
+    R_yaw_inv = np.zeros(R.shape[:-2] + (3, 3), dtype=data.dtype)
+    R_yaw_inv[..., 0, 0] = cos_h
+    R_yaw_inv[..., 0, 1] = -sin_h
+    R_yaw_inv[..., 1, 0] = sin_h
+    R_yaw_inv[..., 1, 1] = cos_h
+    R_yaw_inv[..., 2, 2] = 1.0
+
+    # Remove yaw: R_local = R_yaw_inv @ R
+    R_local = np.einsum("...ij,...jk->...ik", R_yaw_inv, R)
+
+    # 6D representation: first two columns of R_local
+    col1 = R_local[..., :, 0]  # (..., 3)
+    col2 = R_local[..., :, 1]  # (..., 3)
+    rot_6d = np.concatenate([col1, col2], axis=-1)  # (..., 6)
+
+    # Reassemble: [xy/z, rot_6d, remaining joints]
+    return np.concatenate([data[..., :3], rot_6d, data[..., 7:]], axis=-1)
+
+
+def preprocess_data(
+    data: np.ndarray,
+    exclude_xy: bool,
+    do_handle_rotation: bool,
+) -> np.ndarray:
+    """Preprocess qpos data by handling rotation and excluding XY.
+
+    Applied in order: handle_rotation (if enabled) then exclude_xy.
+
+    Args:
+        data: Array of shape (..., 74).
+        exclude_xy: If True, exclude first 2 dims (XY position).
+        do_handle_rotation: If True, convert root quaternion to
+            yaw-removed 6D rotation representation.
+
+    Returns:
+        Preprocessed array.
+    """
+    if do_handle_rotation:
+        data = handle_rotation(data)
 
     if exclude_xy:
-        indices_to_exclude.update(range(2))
-    if exclude_zero_joints:
-        indices_to_exclude.update(ZERO_JOINT_INDICES)
+        data = data[..., 2:]
 
-    indices_to_keep = sorted(all_indices - indices_to_exclude)
-    return data[..., indices_to_keep]
+    return data
 
 
 @flax.struct.dataclass
@@ -603,13 +635,13 @@ def main():
     print(f"Beta: {args.beta} (warmup: {args.beta_warmup_epochs} epochs)")
     print(f"Seeds: {args.seeds}")
     print(f"Exclude XY: {args.exclude_xy}")
-    print(f"Exclude zero joints: {args.exclude_zero_joints}")
+    print(f"Handle rotation: {args.handle_rotation}")
     print("=" * 70)
 
     # Load real dataset
     print(f"\nLoading real dataset: {args.real_dataset}")
     real_data = load_h5_dataset(args.h5_path, args.real_dataset)
-    real_data = filter_joints(real_data, args.exclude_xy, args.exclude_zero_joints)
+    real_data = preprocess_data(real_data, args.exclude_xy, args.handle_rotation)
     print(f"  Shape: {real_data.shape}")
 
     # Load fake datasets
@@ -617,9 +649,7 @@ def main():
     for fake_name in args.fake_datasets:
         print(f"Loading fake dataset: {fake_name}")
         fake_data = load_h5_dataset(args.h5_path, fake_name)
-        fake_data = filter_joints(
-            fake_data, args.exclude_xy, args.exclude_zero_joints
-        )
+        fake_data = preprocess_data(fake_data, args.exclude_xy, args.handle_rotation)
         fake_datasets[fake_name] = fake_data
         print(f"  Shape: {fake_data.shape}")
 
@@ -774,7 +804,7 @@ def main():
             "use_layer_norm": not args.no_layer_norm,
             "seeds": args.seeds,
             "exclude_xy": args.exclude_xy,
-            "exclude_zero_joints": args.exclude_zero_joints,
+            "handle_rotation": args.handle_rotation,
             "split_seed": args.split_seed,
             "timestamp": datetime.now().isoformat(),
         },
