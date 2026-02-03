@@ -204,6 +204,9 @@ def make_wandb_progress_with_offset(
     """
 
     def progress_fn(num_steps: int, metrics: dict[str, Any]) -> None:
+        # Skip the initial eval on resume — it duplicates the last pre-preemption eval
+        if num_steps == 0 and step_offset > 0:
+            return
         adjusted_step = num_steps + step_offset
         metrics["num_steps"] = adjusted_step
         wandb.log(metrics)

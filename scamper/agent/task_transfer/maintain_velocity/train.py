@@ -443,6 +443,11 @@ def main(cfg: DictConfig) -> None:
 
         adjusted_step = current_step + step_offset
 
+        # Skip the initial eval on resume — it duplicates the last pre-preemption eval
+        if current_step == 0 and step_offset > 0:
+            eval_counter[0] += 1
+            return
+
         # Rollout logging
         rollout_logging_fn(
             env=eval_env,
