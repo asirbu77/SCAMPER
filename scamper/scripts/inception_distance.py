@@ -167,6 +167,11 @@ def parse_args() -> argparse.Namespace:
         help="Convert root quaternion (indices 3-6) to yaw-removed 6D rotation",
     )
     parser.add_argument(
+        "--normalize-joints",
+        action="store_true",
+        help="Z-score normalize joint dimensions (not root pos/rot) using real dataset stats",
+    )
+    parser.add_argument(
         "--split-seed",
         type=int,
         default=42,
@@ -269,6 +274,69 @@ def preprocess_data(
         data = data[..., 2:]
 
     return data
+
+
+def get_joint_start_index(exclude_xy: bool, handle_rotation: bool) -> int:
+    """Compute the start index of joint dimensions after preprocessing.
+
+    Args:
+        exclude_xy: Whether XY was excluded.
+        handle_rotation: Whether quaternion was converted to 6D rotation.
+
+    Returns:
+        Index where joint dimensions begin in the preprocessed data.
+    """
+    # Root position dims: 3 (x,y,z) normally, 1 (z only) if xy excluded
+    pos_dims = 1 if exclude_xy else 3
+    # Root rotation dims: 6 (6D rot) if handled, 4 (quaternion) otherwise
+    rot_dims = 6 if handle_rotation else 4
+    return pos_dims + rot_dims
+
+
+def compute_joint_normalization(
+    data: np.ndarray,
+    joint_start: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute z-score normalization parameters for joint dimensions.
+
+    Args:
+        data: Array of shape (N, steps, dim).
+        joint_start: Index where joint dimensions begin.
+
+    Returns:
+        Tuple of (mean, std) arrays each of shape (num_joints,),
+        computed over all samples and timesteps.
+    """
+    joints = data[..., joint_start:]
+    # Reshape to (N*steps, num_joints) for computing stats
+    flat = joints.reshape(-1, joints.shape[-1])
+    mean = flat.mean(axis=0)
+    std = flat.std(axis=0)
+    # Avoid division by zero for constant joints
+    std = np.where(std < 1e-8, 1.0, std)
+    return mean, std
+
+
+def normalize_joints(
+    data: np.ndarray,
+    joint_start: int,
+    mean: np.ndarray,
+    std: np.ndarray,
+) -> np.ndarray:
+    """Apply z-score normalization to joint dimensions.
+
+    Args:
+        data: Array of shape (N, steps, dim).
+        joint_start: Index where joint dimensions begin.
+        mean: Mean array of shape (num_joints,).
+        std: Std array of shape (num_joints,).
+
+    Returns:
+        Array with joint dimensions normalized, root dims untouched.
+    """
+    result = data.copy()
+    result[..., joint_start:] = (data[..., joint_start:] - mean) / std
+    return result
 
 
 @flax.struct.dataclass
@@ -636,13 +704,26 @@ def main():
     print(f"Seeds: {args.seeds}")
     print(f"Exclude XY: {args.exclude_xy}")
     print(f"Handle rotation: {args.handle_rotation}")
+    print(f"Normalize joints: {args.normalize_joints}")
     print("=" * 70)
 
     # Load real dataset
     print(f"\nLoading real dataset: {args.real_dataset}")
     real_data = load_h5_dataset(args.h5_path, args.real_dataset)
     real_data = preprocess_data(real_data, args.exclude_xy, args.handle_rotation)
-    print(f"  Shape: {real_data.shape}")
+    print(f"  Shape after preprocessing: {real_data.shape}")
+
+    # Compute joint normalization from real data if requested
+    joint_norm_params = None
+    if args.normalize_joints:
+        joint_start = get_joint_start_index(args.exclude_xy, args.handle_rotation)
+        joint_mean, joint_std = compute_joint_normalization(real_data, joint_start)
+        joint_norm_params = (joint_start, joint_mean, joint_std)
+        real_data = normalize_joints(real_data, joint_start, joint_mean, joint_std)
+        print(
+            f"  Normalized {real_data.shape[-1] - joint_start} joint dims "
+            f"(starting at index {joint_start})"
+        )
 
     # Load fake datasets
     fake_datasets = {}
@@ -650,6 +731,9 @@ def main():
         print(f"Loading fake dataset: {fake_name}")
         fake_data = load_h5_dataset(args.h5_path, fake_name)
         fake_data = preprocess_data(fake_data, args.exclude_xy, args.handle_rotation)
+        if joint_norm_params is not None:
+            js, jm, jstd = joint_norm_params
+            fake_data = normalize_joints(fake_data, js, jm, jstd)
         fake_datasets[fake_name] = fake_data
         print(f"  Shape: {fake_data.shape}")
 
@@ -805,6 +889,7 @@ def main():
             "seeds": args.seeds,
             "exclude_xy": args.exclude_xy,
             "handle_rotation": args.handle_rotation,
+            "normalize_joints": args.normalize_joints,
             "split_seed": args.split_seed,
             "timestamp": datetime.now().isoformat(),
         },
