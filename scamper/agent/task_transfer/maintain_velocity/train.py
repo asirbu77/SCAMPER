@@ -39,7 +39,7 @@ import orbax.checkpoint as ocp
 import wandb
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as brax_ppo
-from brax.training.acme import running_statistics
+from brax.training.acme import running_statistics, specs
 from mujoco_playground import wrapper
 from omegaconf import DictConfig, OmegaConf
 
@@ -348,7 +348,7 @@ def main(cfg: DictConfig) -> None:
             dummy_net = network_factory()
             key_p, key_v = jax.random.split(jax.random.PRNGKey(0))
             dummy_normalizer = running_statistics.init_state(
-                jax.tree_util.tree_map(lambda x: x.shape[-1:], start_state.obs)
+                specs.Array(start_state.obs.shape[-1:], jnp.dtype("float32"))
             )
             dummy_policy = dummy_net.policy_network.init(key_p)
             dummy_value = dummy_net.value_network.init(key_v)
@@ -358,7 +358,7 @@ def main(cfg: DictConfig) -> None:
             )
             key_p, key_v = jax.random.split(jax.random.PRNGKey(0))
             dummy_normalizer = running_statistics.init_state(
-                jax.tree_util.tree_map(lambda x: x.shape[-1:], start_state.obs)
+                specs.Array(start_state.obs.shape[-1:], jnp.dtype("float32"))
             )
             dummy_policy = dummy_net.policy_network.init(key_p)
             dummy_value = dummy_net.value_network.init(key_v)
