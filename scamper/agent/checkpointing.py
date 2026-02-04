@@ -347,7 +347,7 @@ def _hash_config(cfg: DictConfig) -> str:
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]
 
 
-def _get_job_identifier() -> str:
+def get_job_identifier() -> str:
     """Get a unique identifier for the current job.
 
     Checks for job scheduler environment variables in order:
@@ -394,12 +394,12 @@ def _get_run_state_file_path(cfg: DictConfig) -> Path:
         Path to the run state JSON file.
     """
     base_path = Path(cfg.logging_config.model_path).resolve()
-    job_id = _get_job_identifier()
+    job_id = get_job_identifier()
     config_hash = _hash_config(cfg)
     return base_path / f"run_state_{job_id}_{config_hash}.json"
 
 
-def _atomic_write_json(file_path: Path, data: dict[str, Any]) -> None:
+def atomic_write_json(file_path: Path, data: dict[str, Any]) -> None:
     """Atomically write JSON data to a file.
 
     Writes to a temporary file then renames, ensuring no partial writes.
@@ -419,7 +419,7 @@ def _atomic_write_json(file_path: Path, data: dict[str, Any]) -> None:
     Path(tmp_name).rename(file_path)
 
 
-def _read_json_with_lock(file_path: Path) -> dict[str, Any] | None:
+def read_json_with_lock(file_path: Path) -> dict[str, Any] | None:
     """Read JSON file with shared file lock.
 
     Args:
@@ -461,7 +461,7 @@ def discover_existing_run_state(
     state_file_path = _get_run_state_file_path(cfg)
     logging.info(f"Looking for existing run state at: {state_file_path}")
 
-    run_state = _read_json_with_lock(state_file_path)
+    run_state = read_json_with_lock(state_file_path)
     if not run_state:
         logging.info("No existing run state found")
         return None
@@ -540,7 +540,7 @@ def save_run_state(
         run_state["latest_checkpoint_step"] = latest_step
 
     try:
-        _atomic_write_json(state_file_path, run_state)
+        atomic_write_json(state_file_path, run_state)
         logging.info(f"Saved run state to {state_file_path}")
     except Exception as e:
         logging.error(f"Failed to save run state: {e}")

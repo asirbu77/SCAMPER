@@ -72,6 +72,12 @@ env:
     lateral_velocity: 0.5
     angular_velocity_z: 0.1
 
+# Checkpointing settings
+checkpointing:
+  enabled: true
+  model_path: "./scratch/maintain_velocity_checkpoints"  # Base directory (run_id subdir created under this)
+  max_to_keep: 3
+
 # Logging settings
 logging:
   project: "vnl-playground"
