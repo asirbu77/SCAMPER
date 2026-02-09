@@ -177,6 +177,11 @@ def parse_args() -> argparse.Namespace:
         default=42,
         help="Random seed for split-FID/KID computation",
     )
+    parser.add_argument(
+        "--random-split",
+        action="store_true",
+        help="Use independent random halves for real and fake instead of identical indices",
+    )
 
     return parser.parse_args()
 
@@ -705,6 +710,7 @@ def main():
     print(f"Exclude XY: {args.exclude_xy}")
     print(f"Handle rotation: {args.handle_rotation}")
     print(f"Normalize joints: {args.normalize_joints}")
+    print(f"Random split: {args.random_split}")
     print("=" * 70)
 
     # Load real dataset
@@ -819,8 +825,19 @@ def main():
 
         for fake_name, fake_data in fake_datasets.items():
             mu_fake = extract_features(trained_params, encode_fn, fake_data)
-            fid = compute_fid(mu_real, mu_fake)
-            kid_mean, kid_std = compute_kid(mu_real, mu_fake)
+            if args.random_split:
+                # Independent random half of fake data
+                fake_split_indices = split_rng.permutation(len(mu_fake))[:mid]
+                mu_fake_half = mu_fake[fake_split_indices]
+            else:
+                # Same split indices as real data
+                assert len(mu_fake) == len(mu_real), (
+                    f"Real ({len(mu_real)}) and fake ({len(mu_fake)}) datasets "
+                    f"must have the same number of samples for identical splitting"
+                )
+                mu_fake_half = mu_fake[split_indices[:mid]]
+            fid = compute_fid(mu_real_a, mu_fake_half)
+            kid_mean, kid_std = compute_kid(mu_real_a, mu_fake_half)
 
             seed_results["datasets"][fake_name] = {
                 "fid": fid,
@@ -891,6 +908,7 @@ def main():
             "handle_rotation": args.handle_rotation,
             "normalize_joints": args.normalize_joints,
             "split_seed": args.split_seed,
+            "random_split": args.random_split,
             "timestamp": datetime.now().isoformat(),
         },
         "per_seed_results": all_seed_results,
