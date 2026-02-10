@@ -21,7 +21,7 @@ dependencies = [
     "orbax-checkpoint",
     # MuJoCo
     "mujoco-mjx[warp]>=3.4.0",
-    "mujoco==3.4.1.dev862755621",
+    "mujoco",
     # Rendering (EGL/osmesa support)
     "PyOpenGL==3.1.9",
     # Data & ML utilities
@@ -33,6 +33,7 @@ dependencies = [
     "matplotlib==3.10.0",
     "seaborn==0.13.2",
     "pandas",
+    "plotly",
     "mediapy==1.2.2",
     "imageio[ffmpeg]==2.37.0",
     # Config & logging
