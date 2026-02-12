@@ -64,6 +64,14 @@ train:
 env:
   xml_variant: "limited-collisions"  # 'full-collisions', 'limited-collisions', or 'no-tail-collisions'
   mujoco_impl: "jax"  # 'jax' or 'warp'
+  # Target trajectory mode: "generated" (random walk) or "dataset" (from rollout HDF5)
+  target_mode: "generated"
+  # Path to rollout dataset HDF5 from collect_rollout_dataset.py (required when target_mode=dataset)
+  dataset_path: null
+  # Which rollout type key from the HDF5 (reads "{key}_qpos" dataset)
+  dataset_key: "encoder_decoder"
+  # Render imitation ghost rodent in eval videos (only when target_mode=dataset)
+  render_imitation: false
   amp_x: 0.1
   amp_y: 0.1
   amp_z: 0.2

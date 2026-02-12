@@ -29,6 +29,7 @@ def rollout_logging_fn(
     render_width: int = 640,
     render_every: int = 1,
     eval_count: int = 0,
+    render_ghost: bool = False,
 ) -> None:
     """Log evaluation rollout video and metrics to wandb.
 
@@ -81,6 +82,7 @@ def rollout_logging_fn(
             render_fps,
             render_height,
             render_width,
+            render_ghost=render_ghost,
         )
 
 
@@ -140,6 +142,7 @@ def _log_rollout_video(
     render_fps: int,
     render_height: int = 480,
     render_width: int = 640,
+    render_ghost: bool = False,
 ) -> None:
     """Render rollout video and log to wandb.
 
@@ -152,17 +155,30 @@ def _log_rollout_video(
         render_fps: Frames per second for output video.
         render_height: Height in pixels for output video.
         render_width: Width in pixels for output video.
+        render_ghost: Whether to render translucent ghost rodent from dataset.
     """
     video_path = f"{model_path}/{current_step}.mp4"
 
     try:
         with imageio.get_writer(video_path, fps=render_fps) as writer:
-            frames = env.render(
-                rollout,
-                camera=render_camera,
-                height=render_height,
-                width=render_width,
-            )
+            if render_ghost:
+                # Access base env directly — mujoco_playground Wrapper.render()
+                # doesn't forward **kwargs, so render_ghost won't pass through.
+                base_env = getattr(env, "env", env)
+                frames = base_env.render(
+                    rollout,
+                    camera=render_camera,
+                    height=render_height,
+                    width=render_width,
+                    render_ghost=True,
+                )
+            else:
+                frames = env.render(
+                    rollout,
+                    camera=render_camera,
+                    height=render_height,
+                    width=render_width,
+                )
             for frame in frames:
                 writer.append_data(frame)
 

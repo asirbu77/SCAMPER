@@ -33,9 +33,12 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+import h5py
 import hydra
 import jax
 import jax.numpy as jnp
+import mujoco
+import numpy as np
 import orbax.checkpoint as ocp
 import wandb
 from brax.training.agents.ppo import networks as ppo_networks
@@ -80,6 +83,40 @@ jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 # Orbax step prefix for task transfer checkpoints
 _STEP_PREFIX = "TaskTransfer"
+
+
+def extract_skull_trajectories(dataset_path, dataset_key, mj_model):
+    """Extract skull world positions from rollout dataset qpos via FK.
+
+    Args:
+        dataset_path: Path to HDF5 from collect_rollout_dataset.py.
+        dataset_key: Rollout type key (e.g. "encoder_decoder").
+        mj_model: Compiled MuJoCo model.
+
+    Returns:
+        Tuple of (skull_trajectories, qpos_data):
+            skull_trajectories: numpy (num_clips, num_steps, 3) absolute positions
+            qpos_data: numpy (num_clips, num_steps, qpos_dim) full qpos trajectories
+    """
+    hdf5_key = f"{dataset_key}_qpos"
+    with h5py.File(dataset_path, "r") as f:
+        qpos_data = f[hdf5_key][:]  # (num_clips, num_steps, qpos_dim)
+
+    num_clips, num_steps, _ = qpos_data.shape
+
+    skull_body_id = mujoco.mj_name2id(
+        mj_model, mujoco.mjtObj.mjOBJ_BODY, "skull-rodent"
+    )
+    mj_data = mujoco.MjData(mj_model)
+    skull_trajs = np.zeros((num_clips, num_steps, 3), dtype=np.float32)
+
+    for clip_idx in range(num_clips):
+        for step_idx in range(num_steps):
+            mj_data.qpos[:] = qpos_data[clip_idx, step_idx]
+            mujoco.mj_forward(mj_model, mj_data)
+            skull_trajs[clip_idx, step_idx] = mj_data.xpos[skull_body_id]
+
+    return skull_trajs, qpos_data
 
 
 @hydra.main(version_base=None, config_path="./", config_name="config")
@@ -208,8 +245,50 @@ def main(cfg: DictConfig) -> None:
         f"Reward weights: distance_to_target={cfg.env.reward_weights.distance_to_target}"
     )
 
+    # Target trajectory mode
+    target_mode = cfg.env.get("target_mode", "generated")
+    env_cfg.target_mode = target_mode
+    render_imitation = cfg.env.get("render_imitation", False)
+
+    trajectory_dataset = None
+    initial_qpos_dataset = None
+    qpos_dataset = None
+    if target_mode == "dataset":
+        dataset_path = cfg.env.dataset_path
+        if dataset_path is None:
+            raise ValueError("env.dataset_path required when target_mode='dataset'")
+        dataset_path = str(Path(dataset_path).resolve())
+        dataset_key = cfg.env.get("dataset_key", "encoder_decoder")
+
+        # Create temporary env to get MuJoCo model for FK
+        _fk_env = follow_target.FollowTarget(config=env_cfg)
+        logging.info(
+            f"Extracting skull trajectories from {dataset_path} (key={dataset_key})"
+        )
+        skull_trajs, all_qpos = extract_skull_trajectories(
+            dataset_path, dataset_key, _fk_env.mj_model
+        )
+        del _fk_env
+
+        trajectory_dataset = jnp.array(skull_trajs)
+        initial_qpos_dataset = jnp.array(all_qpos[:, 0, :])  # (N, qpos_dim)
+        num_trajs, traj_len, _ = trajectory_dataset.shape
+        logging.info(f"Loaded {num_trajs} trajectories of length {traj_len}")
+
+        if render_imitation:
+            qpos_dataset = jnp.array(all_qpos)  # (N, T, qpos_dim) for ghost rendering
+            logging.info("Ghost rendering enabled: full qpos dataset loaded")
+
+        # Auto-override episode_length to match dataset trajectory length
+        env_cfg.episode_length = int(traj_len)
+        logging.info(f"Episode length overridden to {traj_len} (from dataset)")
+
     def make_wrapped_env(is_eval: bool = False):
         base_env = follow_target.FollowTarget(config=env_cfg)
+        if target_mode == "dataset" and trajectory_dataset is not None:
+            base_env.set_trajectory_dataset(
+                trajectory_dataset, initial_qpos_dataset, qpos_dataset
+            )
 
         if cfg.mode == "decoder_only":
             return DecoderHighLevelWrapper(
@@ -460,13 +539,14 @@ def main(cfg: DictConfig) -> None:
             params=params,
             current_step=adjusted_step,
             model_path=model_path,
-            episode_length=cfg.train.episode_length,
+            episode_length=int(env_cfg.episode_length),
             render_camera=cfg.logging.render_camera,
             render_fps=cfg.logging.render_fps,
             render_height=cfg.logging.render_height,
             render_width=cfg.logging.render_width,
             render_every=cfg.logging.render_every,
             eval_count=eval_counter[0],
+            render_ghost=(render_imitation and target_mode == "dataset"),
         )
 
         # Save checkpoint (skip on very first eval call which is at step 0)
@@ -495,7 +575,7 @@ def main(cfg: DictConfig) -> None:
     # ----------------------------------------------------------------
     training_params = {
         "num_timesteps": remaining_timesteps,
-        "episode_length": cfg.train.episode_length,
+        "episode_length": int(env_cfg.episode_length),
         "num_envs": cfg.train.num_envs,
         "batch_size": cfg.train.batch_size,
         "num_minibatches": cfg.train.num_minibatches,
