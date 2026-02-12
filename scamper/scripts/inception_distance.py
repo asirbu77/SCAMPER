@@ -182,6 +182,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use independent random halves for real and fake instead of identical indices",
     )
+    parser.add_argument(
+        "--exclude-datasets",
+        nargs="*",
+        default=None,
+        help="Dataset names to exclude from fake datasets (e.g., original_qpos)",
+    )
 
     return parser.parse_args()
 
@@ -688,6 +694,13 @@ def main():
                 f"No fake datasets found. H5 file only contains: {all_datasets}"
             )
         print(f"Auto-discovered {len(args.fake_datasets)} fake datasets")
+
+    # Exclude datasets if requested
+    if args.exclude_datasets:
+        args.fake_datasets = [
+            ds for ds in args.fake_datasets if ds not in args.exclude_datasets
+        ]
+        print(f"After exclusions: {len(args.fake_datasets)} fake datasets")
 
     # Create output directory
     output_dir = Path(args.output_dir)
