@@ -41,6 +41,7 @@ import mujoco
 import numpy as np
 import orbax.checkpoint as ocp
 import wandb
+from brax.training import acting
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as brax_ppo
 from brax.training.acme import running_statistics, specs
@@ -283,12 +284,53 @@ def main(cfg: DictConfig) -> None:
         env_cfg.episode_length = int(traj_len)
         logging.info(f"Episode length overridden to {traj_len} (from dataset)")
 
-    def make_wrapped_env(is_eval: bool = False):
+    # Train/test split for dataset mode
+    train_traj = trajectory_dataset
+    train_init_qpos = initial_qpos_dataset
+    train_qpos = qpos_dataset
+    test_traj = None
+    test_init_qpos = None
+    test_qpos = None
+
+    if target_mode == "dataset" and trajectory_dataset is not None:
+        train_subset_ratio = cfg.env.get("train_subset_ratio", 0.8)
+        if train_subset_ratio < 1.0:
+            num_trajs = trajectory_dataset.shape[0]
+            num_train = max(1, int(num_trajs * train_subset_ratio))
+            num_test = num_trajs - num_train
+
+            if num_test < 1:
+                logging.warning(
+                    f"Not enough clips for train/test split "
+                    f"({num_trajs} clips, ratio={train_subset_ratio}). "
+                    f"Skipping split."
+                )
+            else:
+                perm = jax.random.permutation(
+                    jax.random.PRNGKey(cfg.train.seed), num_trajs
+                )
+                train_idx = perm[:num_train]
+                test_idx = perm[num_train:]
+
+                train_traj = trajectory_dataset[train_idx]
+                train_init_qpos = initial_qpos_dataset[train_idx]
+                test_traj = trajectory_dataset[test_idx]
+                test_init_qpos = initial_qpos_dataset[test_idx]
+
+                if qpos_dataset is not None:
+                    train_qpos = qpos_dataset[train_idx]
+                    test_qpos = qpos_dataset[test_idx]
+
+                logging.info(
+                    f"Train/test split: {num_train} train, "
+                    f"{num_test} test clips "
+                    f"(ratio={train_subset_ratio})"
+                )
+
+    def make_wrapped_env(traj_data=None, init_qpos_data=None, qpos_data=None):
         base_env = follow_target.FollowTarget(config=env_cfg)
-        if target_mode == "dataset" and trajectory_dataset is not None:
-            base_env.set_trajectory_dataset(
-                trajectory_dataset, initial_qpos_dataset, qpos_dataset
-            )
+        if target_mode == "dataset" and traj_data is not None:
+            base_env.set_trajectory_dataset(traj_data, init_qpos_data, qpos_data)
 
         if cfg.mode == "decoder_only":
             return DecoderHighLevelWrapper(
@@ -310,8 +352,12 @@ def main(cfg: DictConfig) -> None:
                 noise_logvar=cfg.prior_decoder.noise_logvar,
             )
 
-    env = make_wrapped_env(is_eval=False)
-    eval_env = make_wrapped_env(is_eval=True)
+    env = make_wrapped_env(train_traj, train_init_qpos, train_qpos)
+    eval_env = make_wrapped_env(train_traj, train_init_qpos, train_qpos)
+    if test_traj is not None:
+        test_eval_env = make_wrapped_env(test_traj, test_init_qpos, test_qpos)
+    else:
+        test_eval_env = None
 
     logging.info(f"Training mode: {cfg.mode}")
     logging.info(f"Environment action size (latent): {env.action_size}")
@@ -421,6 +467,36 @@ def main(cfg: DictConfig) -> None:
 
         make_logging_policy = make_logging_inference_fn(ppo_network)
         jit_logging_inference_fn = jax.jit(make_logging_policy(deterministic=True))
+
+    # ----------------------------------------------------------------
+    # Phase 5b: Create test set evaluator (if train/test split is active)
+    # ----------------------------------------------------------------
+    test_evaluator = None
+    if test_eval_env is not None:
+        # Build the network for make_inference_fn
+        if cfg.mode == "scratch":
+            test_network = scratch_network
+        else:
+            test_network = ppo_network
+
+        test_make_policy = ppo_networks.make_inference_fn(test_network)
+
+        wrapped_test_env = wrapper.wrap_for_brax_training(
+            test_eval_env,
+            full_reset=True,
+            episode_length=int(env_cfg.episode_length),
+            action_repeat=cfg.train.get("action_repeat", 1),
+        )
+
+        test_evaluator = acting.Evaluator(
+            eval_env=wrapped_test_env,
+            eval_policy_fn=functools.partial(test_make_policy, deterministic=True),
+            num_eval_envs=128,
+            episode_length=int(env_cfg.episode_length),
+            action_repeat=cfg.train.get("action_repeat", 1),
+            key=jax.random.PRNGKey(cfg.train.seed + 1),
+        )
+        logging.info("Test set evaluator created (128 eval envs)")
 
     # ----------------------------------------------------------------
     # Phase 6: If resuming, load Brax params from task transfer checkpoint
@@ -548,6 +624,16 @@ def main(cfg: DictConfig) -> None:
             eval_count=eval_counter[0],
             render_ghost=(render_imitation and target_mode == "dataset"),
         )
+
+        # Test set evaluation
+        if test_evaluator is not None:
+            test_metrics = test_evaluator.run_evaluation(params, training_metrics={})
+            renamed = {}
+            for key, value in test_metrics.items():
+                if key.startswith("eval/"):
+                    renamed[key.replace("eval/", "eval/test_set/", 1)] = value
+            if renamed:
+                wandb.log(renamed, commit=False)
 
         # Save checkpoint (skip on very first eval call which is at step 0)
         if checkpointing_enabled and ckpt_mgr is not None and current_step > 0:

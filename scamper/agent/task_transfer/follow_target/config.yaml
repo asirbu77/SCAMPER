@@ -72,6 +72,9 @@ env:
   dataset_key: "encoder_decoder"
   # Render imitation ghost rodent in eval videos (only when target_mode=dataset)
   render_imitation: false
+  # Train/test split ratio for dataset mode (fraction used for training).
+  # Only applies when target_mode="dataset". Set to 1.0 to disable split.
+  train_subset_ratio: 0.8
   amp_x: 0.1
   amp_y: 0.1
   amp_z: 0.2
