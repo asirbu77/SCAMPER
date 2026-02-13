@@ -382,6 +382,16 @@ def main(cfg: DictConfig) -> None:
     rng = jax.random.PRNGKey(cfg.train.seed)
     start_state = jit_reset(rng)
 
+    # Use test env for rollout videos when split is active
+    if test_eval_env is not None:
+        rollout_env = test_eval_env
+        jit_rollout_reset = jax.jit(test_eval_env.reset)
+        jit_rollout_step = jax.jit(test_eval_env.step)
+    else:
+        rollout_env = eval_env
+        jit_rollout_reset = jit_reset
+        jit_rollout_step = jit_step
+
     action_size = env.action_size
 
     if cfg.mode == "scratch":
@@ -606,11 +616,11 @@ def main(cfg: DictConfig) -> None:
             eval_counter[0] += 1
             return
 
-        # Rollout logging
+        # Rollout logging (uses test set when split is active)
         rollout_logging_fn(
-            env=eval_env,
-            jit_reset=jit_reset,
-            jit_step=jit_step,
+            env=rollout_env,
+            jit_reset=jit_rollout_reset,
+            jit_step=jit_rollout_step,
             jit_inference_fn=lambda p, obs, rng: jit_logging_inference_fn(p, obs, rng),
             params=params,
             current_step=adjusted_step,
