@@ -39,6 +39,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 import orbax.checkpoint as ocp
 import wandb
 from brax.training import acting
@@ -270,6 +271,17 @@ def main(cfg: DictConfig) -> None:
             dataset_path, dataset_key, _fk_env.mj_model
         )
         del _fk_env
+
+        # Optional Gaussian smoothing of skull trajectories
+        dataset_smooth_sigma = cfg.env.get("dataset_smooth_sigma", 0.0)
+        if dataset_smooth_sigma > 0:
+            skull_trajs = gaussian_filter1d(
+                skull_trajs, sigma=dataset_smooth_sigma, axis=1
+            )
+            logging.info(
+                f"Applied Gaussian smoothing to skull trajectories "
+                f"(sigma={dataset_smooth_sigma})"
+            )
 
         trajectory_dataset = jnp.array(skull_trajs)
         initial_qpos_dataset = jnp.array(all_qpos[:, 0, :])  # (N, qpos_dim)
