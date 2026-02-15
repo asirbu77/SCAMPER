@@ -327,6 +327,18 @@ def main(cfg: DictConfig) -> None:
                     f"(ratio={train_subset_ratio})"
                 )
 
+    # Set actuator type: scratch mode can optionally use PD actuators;
+    # decoder_only and prior_decoder always use torque (frozen decoder
+    # was trained with torque actuators).
+    if cfg.mode == "scratch":
+        env_cfg.torque_actuators = cfg.scratch.get("torque_actuators", True)
+        if not env_cfg.torque_actuators:
+            logging.info("Scratch mode: using PD actuators")
+        else:
+            logging.info("Scratch mode: using torque actuators")
+    else:
+        env_cfg.torque_actuators = True
+
     def make_wrapped_env(traj_data=None, init_qpos_data=None, qpos_data=None):
         base_env = follow_target.FollowTarget(config=env_cfg)
         if target_mode == "dataset" and traj_data is not None:
