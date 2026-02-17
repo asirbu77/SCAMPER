@@ -68,13 +68,11 @@ train:
 env:
   xml_variant: "limited-collisions"  # 'full-collisions', 'limited-collisions', or 'no-tail-collisions'
   mujoco_impl: "jax"  # 'jax' or 'warp'
-  target_speed: 1.0
   # Sliding friction for bowl heightfield (MuJoCo default is 1.0, rodent paws have 1.5)
   hfield_friction: 1.0
   # Reward term weights (from vnl_playground bowl_escape task)
   reward_weights:
-    escape_x_upright: 1.0
-    speed: 1.0
+    escape: 1.0
 
 # Checkpointing settings
 checkpointing:

@@ -188,19 +188,11 @@ def main(cfg: DictConfig) -> None:
     env_cfg.mujoco_impl = cfg.env.get("mujoco_impl", "jax")
     logging.info(f"Using mujoco_impl: {env_cfg.mujoco_impl}")
     env_cfg.ctrl_dt = ckpt_cfg["env_config"]["ctrl_dt"]
-    env_cfg.target_speed = cfg.env.target_speed
     env_cfg.reward_terms = {
-        "escape_x_upright": {"weight": cfg.env.reward_weights.escape_x_upright},
-        "speed": {"weight": cfg.env.reward_weights.speed},
+        "escape": {"weight": cfg.env.reward_weights.escape},
     }
-    logging.info(
-        f"Environment config: ctrl_dt={env_cfg.ctrl_dt}, "
-        f"target_speed={env_cfg.target_speed}"
-    )
-    logging.info(
-        f"Reward weights: escape_x_upright={cfg.env.reward_weights.escape_x_upright}, "
-        f"speed={cfg.env.reward_weights.speed}"
-    )
+    logging.info(f"Environment config: ctrl_dt={env_cfg.ctrl_dt}")
+    logging.info(f"Reward weights: escape={cfg.env.reward_weights.escape}")
 
     # Set actuator type: scratch mode can optionally use PD actuators;
     # decoder_only and prior_decoder always use torque (frozen decoder
