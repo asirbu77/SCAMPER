@@ -8,6 +8,7 @@ patch.ipynb
 jax_cache/
 results/
 scratch
+notebooks/plots/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
