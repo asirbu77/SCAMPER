@@ -76,7 +76,7 @@ env:
 checkpointing:
   enabled: true
   model_path: "./scratch/maintain_velocity_checkpoints"  # Base directory (run_id subdir created under this)
-  max_to_keep: 3
+  max_to_keep: null
 
 # Logging settings
 logging:

@@ -342,12 +342,10 @@ def get_run_state_file_path(cfg: DictConfig, model_path_base: str) -> Path:
 
 
 def _find_run_state_file(cfg: DictConfig, model_path_base: str) -> Path | None:
-    """Find a run state file for this config, tolerating SLURM job ID changes.
+    """Find a run state file for this config using the current job identifier.
 
-    First checks for an exact match using the current job identifier. If not
-    found, searches for any run state file with the same config hash (handles
-    the common case where a job is manually resubmitted after wall-time
-    expiration and receives a new SLURM job ID).
+    SLURM preemption requeues jobs with the same job ID, so an exact match
+    on job identifier + config hash is sufficient for preemption recovery.
 
     Args:
         cfg: Task transfer config.
@@ -356,25 +354,9 @@ def _find_run_state_file(cfg: DictConfig, model_path_base: str) -> Path | None:
     Returns:
         Path to the run state file, or None if not found.
     """
-    # Try exact match first (fast path for requeued jobs with same ID)
     exact_path = get_run_state_file_path(cfg, model_path_base)
     if exact_path.exists():
         return exact_path
-
-    # Fall back to glob search by config hash (handles new job IDs)
-    config_hash = hash_task_transfer_config(cfg)
-    base_path = Path(model_path_base).resolve()
-    candidates = sorted(
-        base_path.glob(f"run_state_*_{config_hash}.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if candidates:
-        logging.info(
-            f"Exact run state file not found, but found match "
-            f"from a previous job: {candidates[0].name}"
-        )
-        return candidates[0]
 
     return None
 

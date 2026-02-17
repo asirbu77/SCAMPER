@@ -14,6 +14,7 @@ Example usage:
 
 import argparse
 import csv
+import h5py
 import json
 import os
 import time
@@ -182,6 +183,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use independent random halves for real and fake instead of identical indices",
     )
+    parser.add_argument(
+        "--exclude-datasets",
+        nargs="*",
+        default=None,
+        help="Dataset names to exclude from fake datasets (e.g., original_qpos)",
+    )
+    parser.add_argument(
+        "--remove-fallen",
+        action="store_true",
+        help="Exclude clips where encoder-decoder skull z goes below ground",
+    )
 
     return parser.parse_args()
 
@@ -279,6 +291,54 @@ def preprocess_data(
         data = data[..., 2:]
 
     return data
+
+
+def find_fallen_clip_indices(h5_path: str, real_dataset_name: str) -> np.ndarray:
+    """Find clip indices where the skull z position goes below ground.
+
+    Runs MuJoCo forward kinematics on each frame of the real dataset to get
+    the world-space position of the ``skull-rodent`` body, then returns
+    indices of clips where skull z < 0 at any timestep.
+
+    Args:
+        h5_path: Path to H5 dataset file.
+        real_dataset_name: Name of the real dataset key in H5 file.
+
+    Returns:
+        1-D array of clip indices where skull z < 0.
+    """
+    import mujoco
+    from vnl_playground.tasks.rodent import imitation
+
+    os.environ.setdefault("MUJOCO_GL", "egl")
+    os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+
+    # Load raw qpos from H5
+    with h5py.File(h5_path, "r") as f:
+        qpos_data = f[real_dataset_name][:]  # (num_clips, num_steps, qpos_dim)
+
+    num_clips, num_steps, _ = qpos_data.shape
+
+    # Build composed arena+walker model using default bundled reference clips
+    env = imitation.Imitation()
+    mj_model = env.mj_model
+    del env
+
+    skull_body_id = mujoco.mj_name2id(
+        mj_model, mujoco.mjtObj.mjOBJ_BODY, "skull-rodent"
+    )
+    mj_data = mujoco.MjData(mj_model)
+
+    fallen = []
+    for clip_idx in range(num_clips):
+        for step_idx in range(num_steps):
+            mj_data.qpos[:] = qpos_data[clip_idx, step_idx]
+            mujoco.mj_forward(mj_model, mj_data)
+            if mj_data.xpos[skull_body_id, 2] < 0:
+                fallen.append(clip_idx)
+                break  # early exit once found for this clip
+
+    return np.array(fallen, dtype=np.intp)
 
 
 def get_joint_start_index(exclude_xy: bool, handle_rotation: bool) -> int:
@@ -689,6 +749,13 @@ def main():
             )
         print(f"Auto-discovered {len(args.fake_datasets)} fake datasets")
 
+    # Exclude datasets if requested
+    if args.exclude_datasets:
+        args.fake_datasets = [
+            ds for ds in args.fake_datasets if ds not in args.exclude_datasets
+        ]
+        print(f"After exclusions: {len(args.fake_datasets)} fake datasets")
+
     # Create output directory
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -711,11 +778,30 @@ def main():
     print(f"Handle rotation: {args.handle_rotation}")
     print(f"Normalize joints: {args.normalize_joints}")
     print(f"Random split: {args.random_split}")
+    print(f"Remove fallen: {args.remove_fallen}")
     print("=" * 70)
 
     # Load real dataset
     print(f"\nLoading real dataset: {args.real_dataset}")
     real_data = load_h5_dataset(args.h5_path, args.real_dataset)
+
+    # Find and remove fallen clips if requested (before preprocessing)
+    fallen_indices = None
+    if args.remove_fallen:
+        print(f"\nFinding fallen clips (skull z < 0) via FK...")
+        fallen_indices = find_fallen_clip_indices(args.h5_path, args.real_dataset)
+        if len(fallen_indices) > 0:
+            keep_mask = np.ones(len(real_data), dtype=bool)
+            keep_mask[fallen_indices] = False
+            real_data = real_data[keep_mask]
+            print(
+                f"  Removed {len(fallen_indices)} fallen clips: "
+                f"{fallen_indices.tolist()}"
+            )
+            print(f"  Remaining clips: {len(real_data)}")
+        else:
+            print("  No fallen clips found")
+
     real_data = preprocess_data(real_data, args.exclude_xy, args.handle_rotation)
     print(f"  Shape after preprocessing: {real_data.shape}")
 
@@ -736,6 +822,10 @@ def main():
     for fake_name in args.fake_datasets:
         print(f"Loading fake dataset: {fake_name}")
         fake_data = load_h5_dataset(args.h5_path, fake_name)
+        if fallen_indices is not None and len(fallen_indices) > 0:
+            keep_mask = np.ones(len(fake_data), dtype=bool)
+            keep_mask[fallen_indices] = False
+            fake_data = fake_data[keep_mask]
         fake_data = preprocess_data(fake_data, args.exclude_xy, args.handle_rotation)
         if joint_norm_params is not None:
             js, jm, jstd = joint_norm_params
@@ -909,6 +999,10 @@ def main():
             "normalize_joints": args.normalize_joints,
             "split_seed": args.split_seed,
             "random_split": args.random_split,
+            "remove_fallen": args.remove_fallen,
+            "num_fallen_removed": (
+                len(fallen_indices) if fallen_indices is not None else 0
+            ),
             "timestamp": datetime.now().isoformat(),
         },
         "per_seed_results": all_seed_results,

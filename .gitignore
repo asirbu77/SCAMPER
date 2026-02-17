@@ -8,6 +8,7 @@ patch.ipynb
 jax_cache/
 results/
 scratch
+notebooks/plots/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -22,9 +23,6 @@ CLAUDE.md
 
 # slurm output folder
 slurm_outputs/
-
-# uv.lock
-uv.lock
 
 # scratch notebooks
 scratch.ipynb

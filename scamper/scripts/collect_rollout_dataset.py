@@ -617,12 +617,19 @@ def main():
     print("\nCreating environment...")
     env, reference_clips = create_environment(cfg)
 
-    # reference_clips.qpos is already (num_clips, num_steps, qpos_dim)
     num_clips = reference_clips.qpos.shape[0]
-    num_steps = reference_clips.qpos.shape[1]
+    clip_length = reference_clips.qpos.shape[1]
+
+    # Compute actual simulation episode length (matching train_imitation.py)
+    # Each mocap frame spans multiple sim steps when ctrl_dt < 1/mocap_hz
+    steps_per_frame = (1 / cfg.env_config.mocap_hz) / cfg.env_config.ctrl_dt
+    # start_frame=0 for collect, so effective clip frames = clip_length - reference_length
+    num_steps = int((clip_length - cfg.env_config.reference_length) * steps_per_frame)
 
     print(f"  Number of clips: {num_clips}")
-    print(f"  Steps per clip: {num_steps}")
+    print(f"  Clip length (mocap frames): {clip_length}")
+    print(f"  Steps per frame: {steps_per_frame}")
+    print(f"  Simulation steps per clip: {num_steps}")
     print(f"  Proprioceptive obs size: {proprioceptive_obs_size}")
 
     # Initialize random key
