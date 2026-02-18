@@ -276,20 +276,12 @@ def main(cfg: DictConfig) -> None:
 
     if cfg.mode == "scratch":
         obs_size = start_state.obs.shape[-1]
-        task_obs_size = obs_size - proprio_size
-
-        decoder_hidden_layer_sizes = tuple(
-            ckpt_cfg["network_config"]["decoder_layer_sizes"]
-        )
 
         def network_factory(*args, **kwargs):
             return make_scratch_ppo_networks(
-                task_obs_size=task_obs_size,
-                proprio_size=proprio_size,
+                obs_size=obs_size,
                 action_size=action_size,
-                latent_size=latent_size,
                 policy_hidden_layer_sizes=tuple(cfg.network.policy_layers),
-                decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
                 value_hidden_layer_sizes=tuple(cfg.network.value_layers),
             )
 
