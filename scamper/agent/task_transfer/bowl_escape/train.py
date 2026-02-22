@@ -36,8 +36,11 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
+import mujoco
 import orbax.checkpoint as ocp
 import wandb
+
+mujoco.set_mju_user_warning(lambda msg: None)
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as brax_ppo
 from brax.training.acme import running_statistics, specs
