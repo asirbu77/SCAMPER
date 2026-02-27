@@ -205,6 +205,18 @@ def main(cfg: DictConfig) -> None:
         f"angular_velocity_z={cfg.env.reward_weights.angular_velocity_z}"
     )
 
+    # Set actuator type: scratch mode can optionally use PD actuators;
+    # decoder_only and prior_decoder always use torque (frozen decoder
+    # was trained with torque actuators).
+    if cfg.mode == "scratch":
+        env_cfg.torque_actuators = cfg.scratch.get("torque_actuators", True)
+        if not env_cfg.torque_actuators:
+            logging.info("Scratch mode: using PD actuators")
+        else:
+            logging.info("Scratch mode: using torque actuators")
+    else:
+        env_cfg.torque_actuators = True
+
     def make_wrapped_env(is_eval: bool = False):
         base_env = maintain_velocity.MaintainVelocity(config=env_cfg)
 

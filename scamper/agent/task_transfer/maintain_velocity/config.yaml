@@ -30,8 +30,9 @@ prior_decoder:
   noise_logvar: -2.0
 
 scratch:
-  # No extra config needed for scratch mode - uses network settings below
-  _placeholder: true
+  # Actuator type: true = torque (matches imitation training), false = PD actuators
+  # Only applies in scratch mode. decoder_only and prior_decoder always use torque.
+  torque_actuators: true
 
 # Network architecture
 network:
