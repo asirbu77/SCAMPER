@@ -20,8 +20,8 @@ dependencies = [
     "optax>=0.2.6",
     "orbax-checkpoint",
     # MuJoCo
-    "mujoco-mjx[warp]>=3.4.0",
-    "mujoco",
+    # "mujoco-mjx[warp]>=3.4.0",
+    # "mujoco",
     # Rendering (EGL/osmesa support)
     "PyOpenGL==3.1.9",
     # Data & ML utilities
@@ -85,8 +85,8 @@ line-length = 88
 
 [tool.uv.sources]
 # vnl-playground = { git = "https://github.com/talmolab/vnl-playground", tag = "v0.0.11" }
-vnl-playground = { path = "/home/mila/a/aidan.sirbu/vnl-playground", editable = true }
-playground = { git = "https://github.com/google-deepmind/mujoco_playground", tag = "v0.1.0" }
+# vnl-playground = { path = "/home/mila/a/aidan.sirbu/vnl-playground", editable = true }
+# playground = { git = "https://github.com/google-deepmind/mujoco_playground", tag = "v0.1.0" }
 
 [pydocstyle]
 convention = "google"
