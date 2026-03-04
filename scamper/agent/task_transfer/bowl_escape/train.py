@@ -215,6 +215,9 @@ def main(cfg: DictConfig) -> None:
 
         base_env = bowl_escape.BowlEscape(config=env_cfg)
 
+        # Increase CCD iterations to suppress warnings from bowl heightfield
+        base_env._mj_model.opt.ccd_iterations = 50
+
         # Modify heightfield friction if specified
         if cfg.env.get("hfield_friction") is not None:
             for i in range(base_env._mj_model.ngeom):
@@ -224,10 +227,11 @@ def main(cfg: DictConfig) -> None:
                         f"Heightfield geom {i} friction set to: {cfg.env.hfield_friction}"
                     )
                     break
-            # Re-put model to MJX after modification
-            base_env._mjx_model = mjx.put_model(
-                base_env._mj_model, impl=env_cfg.mujoco_impl
-            )
+
+        # Re-put model to MJX after modifications
+        base_env._mjx_model = mjx.put_model(
+            base_env._mj_model, impl=env_cfg.mujoco_impl
+        )
 
         if cfg.mode == "decoder_only":
             return DecoderHighLevelWrapper(
