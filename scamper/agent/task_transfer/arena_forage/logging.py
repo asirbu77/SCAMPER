@@ -313,8 +313,8 @@ def _log_scent_heatmap_video(
 
                 fig.tight_layout()
                 fig.canvas.draw()
-                frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-                frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+                buf = fig.canvas.buffer_rgba()
+                frame = np.asarray(buf)[:, :, :3]
                 writer.append_data(frame)
 
         plt.close(fig)
