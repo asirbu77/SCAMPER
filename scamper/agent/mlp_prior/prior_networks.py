@@ -154,6 +154,15 @@ def load_frozen_encoder_decoder(
     if obs_sizes is not None:
         # New dict-based format
         obs_sizes = dict(obs_sizes)
+
+        # Detect track-mjx checkpoints that use "task_obs" instead of "imitation_target"
+        needs_key_remap = (
+            "task_obs" in obs_sizes and "imitation_target" not in obs_sizes
+        )
+        if needs_key_remap:
+            ckpt_obs_sizes = dict(obs_sizes)  # preserve original for loading
+            obs_sizes["imitation_target"] = obs_sizes.pop("task_obs")
+
         ppo_network = imitation_networks.make_intention_ppo_networks(
             obs_sizes=obs_sizes,
             action_size=cfg.network_config.action_size,
@@ -169,15 +178,25 @@ def load_frozen_encoder_decoder(
             value=ppo_network.value_network.init(key_value),
         )
 
-        # Create abstract dict normalizer
-        normalizer_state = DictRunningStatisticsState(
-            imitation_target=running_statistics.init_state(
-                specs.Array(obs_sizes["imitation_target"], jnp.dtype("float32"))
-            ),
-            proprioception=running_statistics.init_state(
-                specs.Array(obs_sizes["proprioception"], jnp.dtype("float32"))
-            ),
-        )
+        if needs_key_remap:
+            # track-mjx checkpoint: normalizer uses nested {state: {task_obs, proprioception}}
+            nested_spec = {
+                "state": {
+                    k: specs.Array((v,), jnp.dtype("float32"))
+                    for k, v in ckpt_obs_sizes.items()
+                }
+            }
+            normalizer_state = running_statistics.init_state(nested_spec)
+        else:
+            # SCAMPER checkpoint: normalizer uses DictRunningStatisticsState
+            normalizer_state = DictRunningStatisticsState(
+                imitation_target=running_statistics.init_state(
+                    specs.Array(obs_sizes["imitation_target"], jnp.dtype("float32"))
+                ),
+                proprioception=running_statistics.init_state(
+                    specs.Array(obs_sizes["proprioception"], jnp.dtype("float32"))
+                ),
+            )
 
         abstract_policy = (normalizer_state, init_params.policy)
 
@@ -191,6 +210,31 @@ def load_frozen_encoder_decoder(
             )["policy"]
 
         normalizer_params, network_params = policy_params
+
+        if needs_key_remap:
+            # Convert track-mjx nested normalizer to SCAMPER DictRunningStatisticsState
+            normalizer_params = DictRunningStatisticsState(
+                imitation_target=running_statistics.RunningStatisticsState(
+                    count=normalizer_params.count,
+                    mean=normalizer_params.mean["state"]["task_obs"],
+                    std=normalizer_params.std["state"]["task_obs"],
+                    summed_variance=normalizer_params.summed_variance["state"][
+                        "task_obs"
+                    ],
+                    std_eps=normalizer_params.std_eps,
+                    mode=normalizer_params.mode,
+                ),
+                proprioception=running_statistics.RunningStatisticsState(
+                    count=normalizer_params.count,
+                    mean=normalizer_params.mean["state"]["proprioception"],
+                    std=normalizer_params.std["state"]["proprioception"],
+                    summed_variance=normalizer_params.summed_variance["state"][
+                        "proprioception"
+                    ],
+                    std_eps=normalizer_params.std_eps,
+                    mode=normalizer_params.mode,
+                ),
+            )
     else:
         # Legacy flat format - need to convert
         from scamper.agent.observation_utils import convert_flat_to_dict_normalizer
@@ -246,6 +290,13 @@ def load_frozen_encoder_decoder(
             "imitation_target": reference_obs_size,
             "proprioception": observation_size - reference_obs_size,
         }
+
+    # Ensure config obs_sizes uses SCAMPER key names for downstream use
+    if hasattr(cfg.network_config, "obs_sizes"):
+        current_obs_sizes = dict(cfg.network_config.obs_sizes)
+        if "task_obs" in current_obs_sizes and "imitation_target" not in current_obs_sizes:
+            current_obs_sizes["imitation_target"] = current_obs_sizes.pop("task_obs")
+            cfg.network_config.obs_sizes = current_obs_sizes
 
     # Extract encoder and decoder params
     encoder_params = network_params["params"]["encoder"]

@@ -124,6 +124,7 @@ def train(
         mp_wrapper.wrap_for_brax_training, full_reset=False
     ),
     prior_rollout_config: Optional[dict] = None,
+    freeze_normalizer: bool = True,
 ):
     """Prior network training.
 
@@ -473,12 +474,18 @@ def train(
         )
         assert data.discount.shape[1:] == (unroll_length,)
 
-        # Update normalization params (dict-based)
-        normalizer_params = update_dict_normalizer(
-            training_state.normalizer_params,
-            data.observation,
-            pmap_axis_name=_PMAP_AXIS_NAME,
-        )
+        # Update normalization params (dict-based).
+        # When freeze_normalizer=True, keep teacher normalizer unchanged.
+        # The frozen encoder/decoder expect the original teacher normalization;
+        # updating the normalizer causes drift that destabilizes training.
+        if freeze_normalizer:
+            normalizer_params = training_state.normalizer_params
+        else:
+            normalizer_params = update_dict_normalizer(
+                training_state.normalizer_params,
+                data.observation,
+                pmap_axis_name=_PMAP_AXIS_NAME,
+            )
 
         (optimizer_state, params, _, _), metrics = jax.lax.scan(
             functools.partial(
