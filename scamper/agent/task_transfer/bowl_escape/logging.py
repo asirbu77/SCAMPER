@@ -66,6 +66,8 @@ def rollout_logging_fn(
         action, _ = jit_inference_fn(params, state.obs, act_rng)
         state = jit_step(state, action)
         rollout.append(state)
+        if state.done:
+            break
 
     # Log reward breakdown per step
     _log_reward_metrics(rollout, current_step)
