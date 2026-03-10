@@ -73,6 +73,12 @@ env:
   # Reward term weights (from vnl_playground bowl_escape task)
   reward_weights:
     escape: 1.0
+    escape_bonus: 500.0
+  # Termination criteria
+  termination_criteria:
+    fallen: {}
+    escaped: {}
+    nan_termination: {}
 
 # Checkpointing settings
 checkpointing:

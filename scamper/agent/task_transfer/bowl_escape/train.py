@@ -193,9 +193,17 @@ def main(cfg: DictConfig) -> None:
     env_cfg.ctrl_dt = ckpt_cfg["env_config"]["ctrl_dt"]
     env_cfg.reward_terms = {
         "escape": {"weight": cfg.env.reward_weights.escape},
+        "escape_bonus": {"weight": cfg.env.reward_weights.escape_bonus},
     }
+    env_cfg.termination_criteria = OmegaConf.to_container(
+        cfg.env.termination_criteria, resolve=True
+    )
     logging.info(f"Environment config: ctrl_dt={env_cfg.ctrl_dt}")
-    logging.info(f"Reward weights: escape={cfg.env.reward_weights.escape}")
+    logging.info(
+        f"Reward weights: escape={cfg.env.reward_weights.escape}, "
+        f"escape_bonus={cfg.env.reward_weights.escape_bonus}"
+    )
+    logging.info(f"Termination criteria: {list(env_cfg.termination_criteria.keys())}")
 
     # Set actuator type: scratch mode can optionally use PD actuators;
     # decoder_only and prior_decoder always use torque (frozen decoder
