@@ -200,6 +200,7 @@ def main(cfg: DictConfig) -> None:
     env_cfg.scent_sigma = cfg.env.scent_sigma
     env_cfg.reward_terms = {
         "treat_collection": {"weight": cfg.env.reward_weights.treat_collection},
+        "scent_proximity": {"weight": cfg.env.reward_weights.scent_proximity},
     }
 
     logging.info(f"Environment config: ctrl_dt={env_cfg.ctrl_dt}")
@@ -208,7 +209,8 @@ def main(cfg: DictConfig) -> None:
         f"spawn_radius={env_cfg.spawn_radius}, scent_sigma={env_cfg.scent_sigma}"
     )
     logging.info(
-        f"Reward weights: treat_collection={cfg.env.reward_weights.treat_collection}"
+        f"Reward weights: treat_collection={cfg.env.reward_weights.treat_collection}, "
+        f"scent_proximity={cfg.env.reward_weights.scent_proximity}"
     )
 
     # Set actuator type: scratch mode can optionally use PD actuators;
