@@ -95,3 +95,4 @@ logging:
   render_height: 480
   render_width: 640
   render_every: 1  # Render video every N evaluation steps (always renders first eval)
+  scent_grid_resolution: 60  # Number of grid cells per axis for scent heatmap video

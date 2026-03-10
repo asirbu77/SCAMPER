@@ -483,6 +483,7 @@ def main(cfg: DictConfig) -> None:
             render_width=cfg.logging.render_width,
             render_every=cfg.logging.render_every,
             eval_count=eval_counter[0],
+            scent_grid_resolution=cfg.logging.scent_grid_resolution,
         )
 
         # Save checkpoint (skip on very first eval call which is at step 0)

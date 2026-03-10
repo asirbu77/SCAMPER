@@ -35,6 +35,7 @@ def rollout_logging_fn(
     render_width: int = 640,
     render_every: int = 1,
     eval_count: int = 0,
+    scent_grid_resolution: int = 60,
 ) -> None:
     """Log evaluation rollout video and metrics to wandb.
 
@@ -72,6 +73,8 @@ def rollout_logging_fn(
         action, _ = jit_inference_fn(params, state.obs, act_rng)
         state = jit_step(state, action)
         rollout.append(state)
+        if state.done:
+            break
 
     # Log reward breakdown per step
     _log_reward_metrics(rollout, current_step)
@@ -95,6 +98,7 @@ def rollout_logging_fn(
             current_step,
             rollout,
             render_fps,
+            grid_resolution=scent_grid_resolution,
         )
 
 
@@ -248,7 +252,7 @@ def _log_scent_heatmap_video(
         # Determine global vmax for consistent colorbar
         vmax = max(float(scent_per_treat.sum(axis=0).max()), 1.0)
 
-        fig, ax = plt.subplots(figsize=(5, 5), dpi=100)
+        fig, ax = plt.subplots(figsize=(4, 4), dpi=128)
 
         with imageio.get_writer(video_path, fps=render_fps) as writer:
             for i, state in enumerate(rollout):
