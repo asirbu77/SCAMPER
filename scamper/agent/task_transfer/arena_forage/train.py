@@ -542,7 +542,7 @@ def main(cfg: DictConfig) -> None:
         restore_checkpoint_path=None,
         restore_params=restore_params_for_brax,
         progress_fn=progress_fn,
-        wrap_env_fn=functools.partial(wrapper.wrap_for_brax_training),
+        wrap_env_fn=functools.partial(wrapper.wrap_for_brax_training, full_reset=True),
     )
 
     logging.info("Starting training...")
