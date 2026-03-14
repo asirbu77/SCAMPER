@@ -3622,6 +3622,7 @@ wheels = [
 
 [[package]]
 name = "scamper"
+version = "0.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "brax" },
