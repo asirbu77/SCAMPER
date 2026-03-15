@@ -196,6 +196,7 @@ def main(cfg: DictConfig) -> None:
     env_cfg.num_treats = cfg.env.num_treats
     env_cfg.treat_sphere_radius = cfg.env.treat_sphere_radius
     env_cfg.treat_height = cfg.env.treat_height
+    env_cfg.min_spawn_radius = cfg.env.min_spawn_radius
     env_cfg.spawn_radius = cfg.env.spawn_radius
     env_cfg.scent_sigma = cfg.env.scent_sigma
     env_cfg.reward_terms = {
@@ -206,6 +207,7 @@ def main(cfg: DictConfig) -> None:
     logging.info(f"Environment config: ctrl_dt={env_cfg.ctrl_dt}")
     logging.info(
         f"Arena forage params: num_treats={env_cfg.num_treats}, "
+        f"min_spawn_radius={env_cfg.min_spawn_radius}, "
         f"spawn_radius={env_cfg.spawn_radius}, scent_sigma={env_cfg.scent_sigma}"
     )
     logging.info(
