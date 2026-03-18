@@ -163,16 +163,18 @@ def prior_training_rollout_logging_fn(
     prior_means = jnp.stack(prior_means)
     prior_logvars = jnp.stack(prior_logvars)
 
-    # Compute per-dimension statistics
-    encoder_means_mean = jnp.mean(encoder_means, axis=0)
-    encoder_means_std = jnp.std(encoder_means, axis=0)
-    encoder_logvars_mean = jnp.mean(encoder_logvars, axis=0)
-    encoder_logvars_std = jnp.std(encoder_logvars, axis=0)
+    # Compute per-dimension statistics (average over all axes except last)
+    reduce_axes = tuple(range(encoder_means.ndim - 1))
+    encoder_means_mean = jnp.mean(encoder_means, axis=reduce_axes)
+    encoder_means_std = jnp.std(encoder_means, axis=reduce_axes)
+    encoder_logvars_mean = jnp.mean(encoder_logvars, axis=reduce_axes)
+    encoder_logvars_std = jnp.std(encoder_logvars, axis=reduce_axes)
 
-    prior_means_mean = jnp.mean(prior_means, axis=0)
-    prior_means_std = jnp.std(prior_means, axis=0)
-    prior_logvars_mean = jnp.mean(prior_logvars, axis=0)
-    prior_logvars_std = jnp.std(prior_logvars, axis=0)
+    prior_reduce_axes = tuple(range(prior_means.ndim - 1))
+    prior_means_mean = jnp.mean(prior_means, axis=prior_reduce_axes)
+    prior_means_std = jnp.std(prior_means, axis=prior_reduce_axes)
+    prior_logvars_mean = jnp.mean(prior_logvars, axis=prior_reduce_axes)
+    prior_logvars_std = jnp.std(prior_logvars, axis=prior_reduce_axes)
 
     # Compute KL divergence over rollout
     kl_per_timestep = []
@@ -203,17 +205,17 @@ def prior_training_rollout_logging_fn(
             commit=False,
         )
 
-    # Optionally render video (encoder+decoder rollout)
+    # Optionally render video (encoder+decoder rollout with ghost)
     if render_video:
         render_fps = cfg.render_config.render_fps
-        camera_name = f"{cfg.render_config.render_camera_name}-ghost"
+        render_camera_name = cfg.render_config.render_camera_name
 
         video_path = f"{model_path}/{current_step}_encoder_decoder.mp4"
         try:
             with imageio.get_writer(video_path, fps=render_fps) as writer:
                 video = env.render(
                     rollout,
-                    camera=camera_name,
+                    camera=render_camera_name,
                     height=480,
                     width=640,
                 )
@@ -228,7 +230,7 @@ def prior_training_rollout_logging_fn(
                 },
                 commit=False,
             )
-        except mujoco.FatalError as e:
+        except (mujoco.FatalError, Exception) as e:
             logging.warning(
-                f"Video rendering failed due to MuJoCo error: {e}. Skipping video for this iteration."
+                f"Video rendering failed: {e}. Skipping video for this iteration."
             )

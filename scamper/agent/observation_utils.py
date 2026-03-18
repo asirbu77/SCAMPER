@@ -84,8 +84,10 @@ def flatten_obs_dict(obs: Mapping[str, Any]) -> dict[str, jnp.ndarray]:
         Dict with the same keys but flattened array values. Shape is
         (obs_size,) for unbatched input or (batch_size, obs_size) for batched.
     """
+    # Support both SCAMPER's "imitation_target" key and vnl-playground's "task_obs" key
+    imitation_key = "imitation_target" if "imitation_target" in obs else "task_obs"
     return {
-        "imitation_target": _flatten_nested_obs(obs["imitation_target"]),
+        "imitation_target": _flatten_nested_obs(obs[imitation_key]),
         "proprioception": _flatten_nested_obs(obs["proprioception"]),
     }
 

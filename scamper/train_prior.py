@@ -22,6 +22,8 @@ from mujoco_playground import wrapper as playground_wrappers
 from omegaconf import DictConfig, OmegaConf
 from vnl_playground.tasks.reference_clips import ReferenceClips
 from vnl_playground.tasks.rodent import imitation
+from vnl_playground.tasks.mouse.imitation import MouseImitation
+from vnl_playground.tasks.mouse.reference_clips import MouseReferenceClips
 
 from scamper.agent import checkpointing
 from scamper.agent import wandb_logging
@@ -74,28 +76,42 @@ def main(cfg: DictConfig):
     )
     ckpt_mgr = ocp.CheckpointManager(checkpoint_path, options=mgr_options)
 
-    # Create the reference clips
+    # Create the reference clips and environments based on walker type
     logging.info(f"Loading data: {cfg.env_config.reference_data_path}")
-    reference_clips = ReferenceClips(
-        data_path=cfg.env_config.reference_data_path,
-        n_frames_per_clip=cfg.env_config.clip_length,
-        keep_clips_idx=cfg.env_config.keep_clips_idx,
-    )
-    # Create train/test split
-    key_split, _ = jax.random.split(
-        jax.random.PRNGKey(cfg.train_setup.train_config.seed)
-    )
-    train_clips, test_clips = reference_clips.split(
-        train_ratio=cfg.train_setup.train_subset_ratio,
-        seed=key_split,
-    )
-    # Compute naconmax for warp backend (naconmax = nconmax * num_envs)
-    if hasattr(env_cfg_ml, "nconmax"):
-        env_cfg_ml.naconmax = env_cfg_ml.nconmax * cfg.train_setup.train_config.num_envs
 
-    # Create environments
-    env = imitation.Imitation(config=env_cfg_ml, clips=train_clips)
-    test_env = imitation.Imitation(config=env_cfg_ml, clips=test_clips)
+    if cfg.walker_config.walker_name == "mouse":
+        reference_clips = MouseReferenceClips(
+            data_path=cfg.env_config.reference_data_path,
+            n_frames_per_clip=cfg.env_config.clip_length,
+            keep_clips_idx=cfg.env_config.keep_clips_idx,
+        )
+        key_split, _ = jax.random.split(
+            jax.random.PRNGKey(cfg.train_setup.train_config.seed)
+        )
+        train_clips, test_clips = reference_clips.split(
+            train_ratio=cfg.train_setup.train_subset_ratio,
+            seed=key_split,
+        )
+        env = MouseImitation(config=env_cfg_ml, clips=train_clips)
+        test_env = MouseImitation(config=env_cfg_ml, clips=test_clips)
+    else:
+        reference_clips = ReferenceClips(
+            data_path=cfg.env_config.reference_data_path,
+            n_frames_per_clip=cfg.env_config.clip_length,
+            keep_clips_idx=cfg.env_config.keep_clips_idx,
+        )
+        key_split, _ = jax.random.split(
+            jax.random.PRNGKey(cfg.train_setup.train_config.seed)
+        )
+        train_clips, test_clips = reference_clips.split(
+            train_ratio=cfg.train_setup.train_subset_ratio,
+            seed=key_split,
+        )
+        # Compute naconmax for warp backend (naconmax = nconmax * num_envs)
+        if hasattr(env_cfg_ml, "nconmax"):
+            env_cfg_ml.naconmax = env_cfg_ml.nconmax * cfg.train_setup.train_config.num_envs
+        env = imitation.Imitation(config=env_cfg_ml, clips=train_clips)
+        test_env = imitation.Imitation(config=env_cfg_ml, clips=test_clips)
 
     logging.info(f"Environment config: {cfg.env_config}")
 
@@ -244,7 +260,10 @@ def main(cfg: DictConfig):
     # Use train_clips to ensure same clips as prior rollout evaluator
     rollout_cfg = env_cfg_ml.copy_and_resolve_references()
     rollout_cfg.start_frame_range = [0, 0]
-    rollout_env = imitation.Imitation(config=rollout_cfg, clips=train_clips)
+    if cfg.walker_config.walker_name == "mouse":
+        rollout_env = MouseImitation(config=rollout_cfg, clips=train_clips)
+    else:
+        rollout_env = imitation.Imitation(config=rollout_cfg, clips=train_clips)
 
     # Define the jit reset/step functions for logging
     jit_reset = jax.jit(rollout_env.reset)

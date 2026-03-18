@@ -1,0 +1,158 @@
+# =============================================================================
+# Mouse Arm Prior Training Configuration
+# =============================================================================
+# Configuration for training a prior network on the mouse arm imitation task.
+# The encoder and decoder are frozen from a pretrained imitation checkpoint;
+# only the prior is trained using KL divergence loss.
+# =============================================================================
+
+# =============================================================================
+# Teacher Model Configuration (pretrained imitation)
+# =============================================================================
+teacher_config:
+  checkpoint_path: null
+  checkpoint_step: null
+
+# =============================================================================
+# VNL Environment Configuration
+# =============================================================================
+env_config:
+  env_name: "MouseImitation"
+  mujoco_impl: "jax"
+
+  # Physics Solver
+  solver: "cg"
+  iterations: 6
+  ls_iterations: 6
+  noslip_iterations: 0
+
+  # Timing (mouse arm uses faster control and mocap rates)
+  sim_dt: 0.00125
+  ctrl_dt: 0.0025
+  mocap_hz: 200
+
+  # Reference Clip Settings
+  clip_length: 100
+  clip_set: "all"
+  reference_length: 1
+  start_frame_range: [0, 1]
+  qvel_init: "reference"
+  keep_clips_idx: null
+
+  # Walker-specific settings
+  tracked_bodies: ["scapula", "humerus", "ulna", "radius", "wrist_body"]
+  end_effector: "wrist_body"
+
+  # Domain Randomization (disabled for mouse arm)
+  domain_randomization:
+    use_domain_randomization: false
+    floor_friction: [0.4, 1.0]
+    static_friction_scale: [0.9, 1.1]
+    armature_scale: [1.0, 1.05]
+    com_jitter: [-0.05, 0.05]
+    link_mass_scale: [0.9, 1.1]
+    torso_mass_jitter: [-0.02, 0.02]
+    qpos0_jitter: [-0.05, 0.05]
+
+  # Reward Terms (for evaluation only — matches vnl-playground training config)
+  reward_terms:
+    joints:
+      exp_scale: 0.2
+      weight: 5.0
+    joints_vel:
+      exp_scale: 0.2
+      weight: 0.0
+    wrist_pos:
+      exp_scale: 0.005
+      weight: 0.0
+    bodies_pos:
+      exp_scale: 0.01
+      weight: 0.0
+    control_cost:
+      weight: 0.01
+    control_diff_cost:
+      weight: 0.0
+
+  # Termination Criteria
+  termination_criteria:
+    pose_error:
+      max_l2_error: 3.0
+    nan_termination: {}
+
+# =============================================================================
+# Rendering Configuration
+# =============================================================================
+render_config:
+  render_camera_name: my_camera
+  render_fps: 100
+  render_interval: 1
+
+# =============================================================================
+# Multi-Mode Prior Rollout Evaluation
+# =============================================================================
+prior_rollout_config:
+  enabled: true
+  eval_interval: 1
+  max_steps: 400
+
+# =============================================================================
+# Network Architecture
+# =============================================================================
+network_config:
+  arch_name: prior
+  prior_layer_sizes: [512, 512, 512]
+
+# =============================================================================
+# Prior Training Loss Configuration
+# =============================================================================
+prior_config:
+  kl_weight: 1
+  grad_clip_norm: 10.0
+  use_kl_schedule: false
+  kl_schedule_params:
+    kl_start_weight: 1e-5
+    kl_end_weight: 1e-3
+    kl_start_ramp: 0.0
+    kl_end_ramp: 0.25
+
+# =============================================================================
+# Training Setup
+# =============================================================================
+train_setup:
+  checkpoint_to_restore: null
+  restore_from_run_state: null
+  train_subset_ratio: 0.8
+  eval_every: 50_000_000
+  reset_every: 50_000_000
+
+  train_config:
+    num_envs: 4096
+    num_timesteps: 1_000_000_000
+    batch_size: 1024
+    num_minibatches: 16
+    num_updates_per_batch: 4
+    learning_rate: 1e-4
+    action_repeat: 1
+    normalize_observations: true
+    unroll_length: 20
+    seed: 0
+    deterministic_eval: true
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+logging_config:
+  project_name: SCAMPER
+  group_name: mouse-prior
+  exp_name: null
+  clip_id: -1
+  model_path: null
+
+# =============================================================================
+# Walker Configuration
+# =============================================================================
+walker_config:
+  walker_name: "mouse"
+  xml_variant: null
+  torque_actuators: false
+  rescale_factor: 1.0

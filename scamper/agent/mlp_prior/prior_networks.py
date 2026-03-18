@@ -391,6 +391,14 @@ def make_encoder_decoder_inference_fn(
         traj_obs = normalized_obs["imitation_target"]
         proprio_obs = normalized_obs["proprioception"]
 
+        # Ensure consistent batch dimensions (nested dict obs may add a
+        # leading dim to one key but not the other)
+        if traj_obs.ndim != proprio_obs.ndim:
+            if traj_obs.ndim > proprio_obs.ndim:
+                proprio_obs = jnp.expand_dims(proprio_obs, axis=0)
+            else:
+                traj_obs = jnp.expand_dims(traj_obs, axis=0)
+
         # Encode trajectory -> latent distribution
         latent_mean, latent_logvar = encoder_module.apply(
             {"params": encoder_params}, traj_obs

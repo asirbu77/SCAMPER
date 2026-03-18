@@ -247,20 +247,21 @@ def train(
         randomization_rng = jax.random.split(key_env, randomization_batch_size)
         v_randomization_fn = functools.partial(randomization_fn, rng=randomization_rng)
 
-    env_proprioceptive_obs_size = int(environment.proprioceptive_obs_size)
     logging.info(f"Reference observation size: {reference_obs_size}")
-    logging.info(
-        f"Environment proprioceptive observation size: {env_proprioceptive_obs_size}"
-    )
+    if hasattr(environment, "proprioceptive_obs_size"):
+        env_proprioceptive_obs_size = int(environment.proprioceptive_obs_size)
+        logging.info(
+            f"Environment proprioceptive observation size: {env_proprioceptive_obs_size}"
+        )
+        if env_proprioceptive_obs_size != teacher_proprioceptive_obs_size:
+            logging.warning(
+                f"Environment proprioceptive_obs_size ({env_proprioceptive_obs_size}) "
+                f"differs from teacher ({teacher_proprioceptive_obs_size}). "
+                f"Using teacher value for decoder compatibility."
+            )
     logging.info(
         f"Teacher proprioceptive observation size: {teacher_proprioceptive_obs_size}"
     )
-    if env_proprioceptive_obs_size != teacher_proprioceptive_obs_size:
-        logging.warning(
-            f"Environment proprioceptive_obs_size ({env_proprioceptive_obs_size}) "
-            f"differs from teacher ({teacher_proprioceptive_obs_size}). "
-            f"Using teacher value for decoder compatibility."
-        )
     proprioceptive_obs_size = teacher_proprioceptive_obs_size
 
     env = wrap_for_training(
@@ -291,8 +292,10 @@ def train(
             reset_fn_donated_env_state, donate_argnums=(0,), keep_unused=True
         )(key_envs)
 
-    # Get observation sizes from environment state
-    obs_sizes = get_obs_sizes(env_state.obs)
+    # Get observation sizes from a single env (strip pmap/vmap batch dims
+    # so _flatten_nested_obs doesn't collapse them into feature dims)
+    single_env_obs = jax.tree_util.tree_map(lambda x: x[0, 0], env_state.obs)
+    obs_sizes = get_obs_sizes(single_env_obs)
 
     # Update config with network info
     config_dict["network_config"].update(
@@ -474,9 +477,14 @@ def train(
         assert data.discount.shape[1:] == (unroll_length,)
 
         # Update normalization params (dict-based)
+        # Merge batch and time dims so _flatten_nested_obs sees (B*T, features)
+        # instead of (B, T, features) which it incorrectly flattens to (B, T*features)
+        obs_for_normalizer = jax.tree_util.tree_map(
+            lambda x: x.reshape(-1, *x.shape[2:]), data.observation
+        )
         normalizer_params = update_dict_normalizer(
             training_state.normalizer_params,
-            data.observation,
+            obs_for_normalizer,
             pmap_axis_name=_PMAP_AXIS_NAME,
         )
 

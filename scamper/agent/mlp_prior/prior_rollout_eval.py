@@ -178,7 +178,11 @@ def check_termination_nan(data: Any) -> jax.Array:
 def compute_world_zaxis_termination(env, datas: Any) -> jax.Array:
     """
     Batch compute world z-axis termination for all timesteps.
+    Returns all-False if the env doesn't support _get_world_zaxis (e.g., fixed-base arms).
     """
+    if not hasattr(env, '_get_world_zaxis'):
+        # Fixed-base envs (e.g., mouse arm) can't go upside down
+        return jnp.zeros(jax.tree_util.tree_leaves(datas.qpos)[0].shape[0], dtype=bool)
     world_zaxes = jax.vmap(env._get_world_zaxis)(datas)  # (max_steps, 3)
     return world_zaxes[:, 2] < 0  # (max_steps,)
 
@@ -238,7 +242,17 @@ class MultiModePriorRolloutEvaluator:
         self.max_steps = max_steps
         self.eval_interval = eval_interval
         self.render_fps = render_fps
-        self.render_camera_name = f"{render_camera_name}-rodent"
+        self.render_camera_name = render_camera_name
+        # Try to find the camera with walker suffix in the env's model
+        if hasattr(env, 'mj_model'):
+            model_cameras = [env.mj_model.camera(i).name for i in range(env.mj_model.ncam)]
+            # If the exact camera name exists, use it; otherwise try with common suffixes
+            if render_camera_name not in model_cameras:
+                for suffix in ["-rodent", "-mouse", "-fruitfly"]:
+                    candidate = f"{render_camera_name}{suffix}"
+                    if candidate in model_cameras:
+                        self.render_camera_name = candidate
+                        break
         self.model_path = model_path
 
         self._key = random.PRNGKey(0)
