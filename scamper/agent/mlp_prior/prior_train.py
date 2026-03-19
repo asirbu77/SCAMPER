@@ -641,10 +641,20 @@ def train(
         f"Starting at iteration: {start_it} with {num_evals_after_init} evals left"
     )
 
-    # Run initial eval
+    # Run initial eval (including one training epoch to get initial KL metrics)
     metrics = {}
     if process_id == 0 and num_evals > 1 and start_it == 0:
         logging.info("Running initial evaluation")
+
+        # Run one training epoch to get initial KL loss from random prior
+        epoch_key, local_key = jax.random.split(local_key)
+        epoch_keys = jax.random.split(epoch_key, local_devices_to_use)
+        training_state, env_state, initial_training_metrics = (
+            training_epoch_with_timing(training_state, env_state, epoch_keys, 0)
+        )
+        metrics.update(initial_training_metrics)
+        logging.info(f"Initial training metrics: {initial_training_metrics}")
+
         policy_param = get_policy_params(training_state)
 
         # Generate shared reset key for all rollouts (prior + encoder_decoder)
