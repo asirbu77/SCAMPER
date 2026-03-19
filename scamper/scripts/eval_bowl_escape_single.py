@@ -131,6 +131,7 @@ def load_model(checkpoint_path, checkpoint_step=None):
     policy_action_size = env.action_size
 
     if mode == "scratch":
+
         def network_factory(*args, **kwargs):
             return make_scratch_ppo_networks(
                 obs_size=obs_size,
@@ -185,7 +186,9 @@ def load_model(checkpoint_path, checkpoint_step=None):
     return jit_reset, jit_step, jit_inference_fn, brax_params, config
 
 
-def run_rollout(jit_reset, jit_step, jit_inference_fn, brax_params, seed, episode_length):
+def run_rollout(
+    jit_reset, jit_step, jit_inference_fn, brax_params, seed, episode_length
+):
     rng = jax.random.PRNGKey(seed)
     reset_rng, act_rng = jax.random.split(rng)
 
@@ -220,7 +223,12 @@ def main():
     all_distances = []
     for seed in range(args.num_seeds):
         distances = run_rollout(
-            jit_reset, jit_step, jit_inference_fn, brax_params, seed, args.episode_length
+            jit_reset,
+            jit_step,
+            jit_inference_fn,
+            brax_params,
+            seed,
+            args.episode_length,
         )
         all_distances.append(distances)
         print(f"  Seed {seed}: final distance = {distances[-1]:.3f} m", flush=True)

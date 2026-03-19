@@ -453,7 +453,10 @@ def create_batched_rollout_fn(
             [jnp.zeros((1, intention_size)), latents_trajectory], axis=0
         )
 
-        return qpos_trajectory, latents_trajectory  # (num_steps, 74), (num_steps, intention_size)
+        return (
+            qpos_trajectory,
+            latents_trajectory,
+        )  # (num_steps, 74), (num_steps, intention_size)
 
     # Vmap over batch of clips
     batched_rollout = jax.jit(jax.vmap(single_rollout))
