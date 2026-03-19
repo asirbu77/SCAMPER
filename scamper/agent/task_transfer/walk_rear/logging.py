@@ -208,6 +208,17 @@ def make_wandb_progress_with_offset(
         if num_steps == 0 and step_offset > 0:
             return
         adjusted_step = num_steps + step_offset
+
+        # Derive conditional mean time-to-success from Brax's aggregated metrics
+        success_key = "eval/episode_success"
+        time_key = "eval/episode_time_to_success"
+        if success_key in metrics and time_key in metrics:
+            success_rate = metrics[success_key]
+            total_time = metrics[time_key]
+            metrics["eval/mean_time_to_success"] = jnp.where(
+                success_rate > 0, total_time / success_rate, jnp.nan
+            )
+
         metrics["num_steps"] = adjusted_step
         wandb.log(metrics)
 

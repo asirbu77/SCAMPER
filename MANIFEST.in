@@ -1,4 +1,0 @@
-prune model_checkpoints
-prune wandb
-prune outputs
-prune site

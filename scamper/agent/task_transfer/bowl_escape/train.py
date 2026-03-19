@@ -5,6 +5,8 @@ Three training modes:
 - prior_decoder: Freeze prior + decoder, train residual encoder
 - scratch: Train both policy and decoder from random initialization
 
+Supports Orbax checkpointing and SLURM preemption recovery.
+
 Usage:
     python -m scamper.agent.task_transfer.bowl_escape.train mode=decoder_only
     python -m scamper.agent.task_transfer.bowl_escape.train mode=prior_decoder
@@ -33,14 +35,18 @@ from pathlib import Path
 
 import hydra
 import jax
-import wandb
+import jax.numpy as jnp
 import mujoco
+import orbax.checkpoint as ocp
+import wandb
+
+mujoco.set_mju_user_warning(lambda msg: None)
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as brax_ppo
-from brax.training.acme import running_statistics
-from mujoco import mjx
+from brax.training.acme import running_statistics, specs
 from mujoco_playground import wrapper
 from omegaconf import DictConfig, OmegaConf
+
 from vnl_playground.tasks.rodent import consts as rodent_consts
 from vnl_playground.tasks.rodent import bowl_escape
 
@@ -48,10 +54,18 @@ from scamper.agent.task_transfer.bowl_escape.checkpoint_utils import (
     load_prior_checkpoint,
     make_decoder_inference_fn,
     make_prior_inference_fn,
+    # Checkpointing / run state
+    discover_existing_run_state,
+    save_run_state,
+    cleanup_run_state,
+    create_checkpoint_callback,
+    save_task_transfer_checkpoint,
+    load_task_transfer_metadata,
+    load_task_transfer_brax_params,
 )
 from scamper.agent.task_transfer.bowl_escape.logging import (
     rollout_logging_fn,
-    wandb_progress,
+    make_wandb_progress_with_offset,
 )
 from scamper.agent.task_transfer.bowl_escape.wrappers import (
     DecoderHighLevelWrapper,
@@ -67,6 +81,9 @@ jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
+# Orbax step prefix for task transfer checkpoints
+_STEP_PREFIX = "TaskTransfer"
+
 
 @hydra.main(version_base=None, config_path="./", config_name="config")
 def main(cfg: DictConfig) -> None:
@@ -79,32 +96,88 @@ def main(cfg: DictConfig) -> None:
         n_devices = 1
         logging.info("Not using GPUs")
 
-    # Generate run ID and paths
-    run_id = datetime.now().strftime("%y%m%d_%H%M%S")
-    model_path = hydra.utils.to_absolute_path(
-        f"./model_checkpoints/bowl_escape_transfer_{cfg.mode}_{run_id}"
+    # ----------------------------------------------------------------
+    # Phase 1: Check for preemption recovery
+    # ----------------------------------------------------------------
+    model_path_base = hydra.utils.to_absolute_path(
+        cfg.checkpointing.get("model_path", "./model_checkpoints")
     )
-    Path(model_path).mkdir(parents=True, exist_ok=True)
+    Path(model_path_base).mkdir(parents=True, exist_ok=True)
+
+    existing_run_state = None
+    step_offset = 0
+    initial_eval_counter = 0
+    restore_params_for_brax = None
+    remaining_timesteps = cfg.train.num_timesteps
+
+    if cfg.checkpointing.get("enabled", True):
+        existing_run_state = discover_existing_run_state(cfg, model_path_base)
+
+    if existing_run_state is not None:
+        # --- Preemption recovery path ---
+        run_id = existing_run_state["run_id"]
+        model_path = existing_run_state["checkpoint_path"]
+        wandb_run_id_to_resume = existing_run_state["wandb_run_id"]
+
+        ckpt_info = load_task_transfer_metadata(
+            model_path, step=existing_run_state["latest_checkpoint_step"]
+        )
+        metadata = ckpt_info["training_metadata"]
+
+        step_offset = metadata["completed_timesteps"]
+        initial_eval_counter = metadata["eval_step"]
+        remaining_timesteps = cfg.train.num_timesteps - step_offset
+
+        if remaining_timesteps <= 0:
+            logging.info("Training already complete, nothing to resume.")
+            return
+
+        logging.info(
+            f"Resuming run {run_id} from step {step_offset}, "
+            f"{remaining_timesteps} timesteps remaining"
+        )
+    else:
+        # --- Fresh start path ---
+        run_id = datetime.now().strftime("%y%m%d_%H%M%S_%f")
+        model_path = hydra.utils.to_absolute_path(f"{model_path_base}/{run_id}")
+        Path(model_path).mkdir(parents=True, exist_ok=True)
+        wandb_run_id_to_resume = None
+
     logging.info(f"Model checkpoint path: {model_path}")
 
-    # Load mlp_prior checkpoint
-    checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
-    logging.info(f"Loading checkpoint from: {checkpoint_path}")
+    # ----------------------------------------------------------------
+    # Phase 2: Load frozen networks from mlp_prior checkpoint
+    # ----------------------------------------------------------------
+    prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
+    logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
 
-    prior_params, decoder_params, normalizer_params, ckpt_cfg = load_prior_checkpoint(
-        checkpoint_path, cfg.checkpoint.step
-    )
+    (
+        encoder_params,
+        prior_params,
+        decoder_params,
+        normalizer_params,
+        ckpt_cfg,
+    ) = load_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]
     logging.info(f"Latent size: {latent_size}, Proprio size: {proprio_size}")
 
+    # Build frozen_networks dict for checkpoint saving
+    frozen_networks = {
+        "encoder_params": encoder_params,
+        "prior_params": prior_params,
+        "decoder_params": decoder_params,
+        "imitation_normalizer": normalizer_params,
+    }
+
     # Create inference functions
     decoder_fn = make_decoder_inference_fn(decoder_params, normalizer_params, ckpt_cfg)
 
-    # Create environment config
+    # ----------------------------------------------------------------
+    # Phase 3: Create environments
+    # ----------------------------------------------------------------
     env_cfg = bowl_escape.default_config()
-    # Resolve XML variant from config
     xml_variant = cfg.env.get("xml_variant", "full-collisions")
     if xml_variant == "limited-collisions":
         env_cfg.walker_xml_path = rodent_consts.RODENT_XML_PATH
@@ -115,27 +188,43 @@ def main(cfg: DictConfig) -> None:
     else:
         raise ValueError(f"Unknown xml_variant: {xml_variant}")
     logging.info(f"Using xml_variant: {xml_variant}")
-    # Resolve MuJoCo backend from config
     env_cfg.mujoco_impl = cfg.env.get("mujoco_impl", "jax")
     logging.info(f"Using mujoco_impl: {env_cfg.mujoco_impl}")
     env_cfg.ctrl_dt = ckpt_cfg["env_config"]["ctrl_dt"]
-    env_cfg.target_speed = cfg.env.target_speed
-    # Set reward term weights
     env_cfg.reward_terms = {
-        "escape_x_upright": {"weight": cfg.env.reward_weights.escape_x_upright},
-        "speed": {"weight": cfg.env.reward_weights.speed},
+        "escape": {"weight": cfg.env.reward_weights.escape},
+        "escape_bonus": {"weight": cfg.env.reward_weights.escape_bonus},
     }
-    logging.info(
-        f"Environment config: ctrl_dt={env_cfg.ctrl_dt}, target_speed={env_cfg.target_speed}"
+    env_cfg.termination_criteria = OmegaConf.to_container(
+        cfg.env.termination_criteria, resolve=True
     )
+    logging.info(f"Environment config: ctrl_dt={env_cfg.ctrl_dt}")
     logging.info(
-        f"Reward weights: escape_x_upright={cfg.env.reward_weights.escape_x_upright}, speed={cfg.env.reward_weights.speed}"
+        f"Reward weights: escape={cfg.env.reward_weights.escape}, "
+        f"escape_bonus={cfg.env.reward_weights.escape_bonus}"
     )
+    logging.info(f"Termination criteria: {list(env_cfg.termination_criteria.keys())}")
 
-    # Create training and eval environments with appropriate wrapper
-    # Wrappers handle both dict and flat observations natively
+    # Set actuator type: scratch mode can optionally use PD actuators;
+    # decoder_only and prior_decoder always use torque (frozen decoder
+    # was trained with torque actuators).
+    if cfg.mode == "scratch":
+        env_cfg.torque_actuators = cfg.scratch.get("torque_actuators", True)
+        if not env_cfg.torque_actuators:
+            logging.info("Scratch mode: using PD actuators")
+        else:
+            logging.info("Scratch mode: using torque actuators")
+    else:
+        env_cfg.torque_actuators = True
+
     def make_wrapped_env(is_eval: bool = False):
+        import mujoco
+        from mujoco import mjx
+
         base_env = bowl_escape.BowlEscape(config=env_cfg)
+
+        # Increase CCD iterations to suppress warnings from bowl heightfield
+        base_env._mj_model.opt.ccd_iterations = 50
 
         # Modify heightfield friction if specified
         if cfg.env.get("hfield_friction") is not None:
@@ -146,17 +235,17 @@ def main(cfg: DictConfig) -> None:
                         f"Heightfield geom {i} friction set to: {cfg.env.hfield_friction}"
                     )
                     break
-            # Re-put model to MJX after modification
-            base_env._mjx_model = mjx.put_model(
-                base_env._mj_model, impl=env_cfg.mujoco_impl
-            )
+
+        # Re-put model to MJX after modifications
+        base_env._mjx_model = mjx.put_model(
+            base_env._mj_model, impl=env_cfg.mujoco_impl
+        )
 
         if cfg.mode == "decoder_only":
             return DecoderHighLevelWrapper(
                 base_env, decoder_fn, latent_size, proprio_size
             )
         elif cfg.mode == "scratch":
-            # Scratch mode: use FlatObsWrapper to convert dict->array for Brax normalizer
             return FlatObsWrapper(base_env)
         else:  # prior_decoder
             prior_fn = make_prior_inference_fn(
@@ -178,62 +267,41 @@ def main(cfg: DictConfig) -> None:
     logging.info(f"Training mode: {cfg.mode}")
     logging.info(f"Environment action size (latent): {env.action_size}")
 
-    # Save config to model path
+    # ----------------------------------------------------------------
+    # Phase 4: Build config dict and save to model path
+    # ----------------------------------------------------------------
     config_dict = OmegaConf.to_container(cfg, resolve=True)
     config_dict["checkpoint_config"] = ckpt_cfg
     with open(Path(model_path) / "config.json", "w") as fp:
         json.dump(config_dict, fp, indent=4, default=str)
 
-    # Initialize wandb
-    wandb_run_id = f"{cfg.logging.exp_name}_{run_id}"
-    wandb.init(
-        project=cfg.logging.project,
-        group=cfg.logging.group_name,
-        config=config_dict,
-        id=wandb_run_id,
-        notes=f"checkpoint: {cfg.checkpoint.path}, mode: {cfg.mode}",
-    )
-
-    # Setup normalization
+    # ----------------------------------------------------------------
+    # Phase 5: Setup normalization and networks
+    # ----------------------------------------------------------------
     normalize = lambda x, y: x
     if cfg.train.normalize_observations:
         normalize = running_statistics.normalize
 
-    # Create PPO networks for inference function setup
     jit_reset = jax.jit(eval_env.reset)
     jit_step = jax.jit(eval_env.step)
     rng = jax.random.PRNGKey(cfg.train.seed)
     start_state = jit_reset(rng)
 
-    # Get observation and action sizes
     action_size = env.action_size
 
     if cfg.mode == "scratch":
-        # Scratch mode: use combined policy+decoder network
-        # Observations are flat arrays (via FlatObsWrapper)
         obs_size = start_state.obs.shape[-1]
-        task_obs_size = obs_size - proprio_size
 
-        decoder_hidden_layer_sizes = tuple(
-            ckpt_cfg["network_config"]["decoder_layer_sizes"]
-        )
-
-        # Create wrapper that accepts Brax's calling convention but uses our values
         def network_factory(*args, **kwargs):
             return make_scratch_ppo_networks(
-                task_obs_size=task_obs_size,
-                proprio_size=proprio_size,
+                obs_size=obs_size,
                 action_size=action_size,
-                latent_size=latent_size,
                 policy_hidden_layer_sizes=tuple(cfg.network.policy_layers),
-                decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
                 value_hidden_layer_sizes=tuple(cfg.network.value_layers),
             )
 
-        # Create scratch network for inference
         scratch_network = network_factory()
 
-        # Create logging inference function for scratch mode
         def make_scratch_logging_policy(scratch_networks):
             """Create logging policy for scratch mode."""
             policy_network = scratch_networks.policy_network
@@ -252,8 +320,6 @@ def main(cfg: DictConfig) -> None:
 
         jit_logging_inference_fn = jax.jit(make_scratch_logging_policy(scratch_network))
     else:
-        # decoder_only and prior_decoder modes: standard MLP PPO
-        # Wrapped envs have flat observations
         obs_size = start_state.obs.shape[-1]
 
         network_factory = functools.partial(
@@ -268,7 +334,6 @@ def main(cfg: DictConfig) -> None:
             preprocess_observations_fn=normalize,
         )
 
-        # Create logging inference function
         def make_logging_inference_fn(ppo_networks):
             """Create inference function for logging rollouts."""
 
@@ -300,26 +365,158 @@ def main(cfg: DictConfig) -> None:
         make_logging_policy = make_logging_inference_fn(ppo_network)
         jit_logging_inference_fn = jax.jit(make_logging_policy(deterministic=True))
 
-    # Define policy_params_fn for logging during training
+    # ----------------------------------------------------------------
+    # Phase 6: If resuming, load Brax params from task transfer checkpoint
+    # ----------------------------------------------------------------
+    if existing_run_state is not None:
+        # Build an abstract brax_params tuple for Orbax structure matching.
+        # Brax params are (normalizer_params, policy_params, value_params).
+        # We initialize a dummy network to get the correct pytree shapes.
+        if cfg.mode == "scratch":
+            dummy_net = network_factory()
+            key_p, key_v = jax.random.split(jax.random.PRNGKey(0))
+            dummy_normalizer = running_statistics.init_state(
+                specs.Array(start_state.obs.shape[-1:], jnp.dtype("float32"))
+            )
+            dummy_policy = dummy_net.policy_network.init(key_p)
+            dummy_value = dummy_net.value_network.init(key_v)
+        else:
+            dummy_net = network_factory(
+                obs_size, action_size, preprocess_observations_fn=normalize
+            )
+            key_p, key_v = jax.random.split(jax.random.PRNGKey(0))
+            dummy_normalizer = running_statistics.init_state(
+                specs.Array(start_state.obs.shape[-1:], jnp.dtype("float32"))
+            )
+            dummy_policy = dummy_net.policy_network.init(key_p)
+            dummy_value = dummy_net.value_network.init(key_v)
+
+        abstract_brax_params = (dummy_normalizer, dummy_policy, dummy_value)
+
+        restore_params_for_brax = load_task_transfer_brax_params(
+            checkpoint_path=model_path,
+            abstract_brax_params=abstract_brax_params,
+            step=ckpt_info["step"],
+        )
+        logging.info("Loaded Brax params for resume")
+
+    # ----------------------------------------------------------------
+    # Phase 7: Initialize wandb (with resume support)
+    # ----------------------------------------------------------------
+    if wandb_run_id_to_resume is not None:
+        wandb_run_id = wandb_run_id_to_resume
+        wandb.init(
+            project=cfg.logging.project,
+            group=cfg.logging.group_name,
+            config=config_dict,
+            id=wandb_run_id,
+            resume="allow",
+            notes=f"checkpoint: {cfg.checkpoint.path}, mode: {cfg.mode}",
+        )
+    else:
+        wandb_run_id = f"{cfg.logging.exp_name}_{run_id}"
+        wandb.init(
+            project=cfg.logging.project,
+            group=cfg.logging.group_name,
+            config=config_dict,
+            id=wandb_run_id,
+            notes=f"checkpoint: {cfg.checkpoint.path}, mode: {cfg.mode}",
+        )
+
+    # ----------------------------------------------------------------
+    # Phase 8: Save run state and create checkpoint infrastructure
+    # ----------------------------------------------------------------
+    checkpointing_enabled = cfg.checkpointing.get("enabled", True)
+
+    if checkpointing_enabled:
+        save_run_state(
+            cfg=cfg,
+            model_path_base=model_path_base,
+            run_id=run_id,
+            checkpoint_path=model_path,
+            wandb_run_id=wandb.run.id,
+        )
+
+        checkpoint_callback = create_checkpoint_callback(
+            cfg=cfg,
+            model_path_base=model_path_base,
+            run_id=run_id,
+            checkpoint_path=model_path,
+            wandb_run_id=wandb.run.id,
+        )
+
+        max_to_keep = cfg.checkpointing.get("max_to_keep", 3)
+        ckpt_mgr = ocp.CheckpointManager(
+            model_path,
+            options=ocp.CheckpointManagerOptions(
+                create=True,
+                step_prefix=_STEP_PREFIX,
+                max_to_keep=max_to_keep,
+            ),
+        )
+    else:
+        checkpoint_callback = None
+        ckpt_mgr = None
+
+    # ----------------------------------------------------------------
+    # Phase 9: Define policy_params_fn with checkpoint saving
+    # ----------------------------------------------------------------
+    eval_counter = [initial_eval_counter]
+
     def policy_params_fn(current_step, make_policy, params, jit_logging_inference_fn):
         del make_policy  # Unused, use our custom logging inference
 
+        adjusted_step = current_step + step_offset
+
+        # Skip the initial eval on resume — it duplicates the last pre-preemption eval
+        if current_step == 0 and step_offset > 0:
+            eval_counter[0] += 1
+            return
+
+        # Rollout logging
         rollout_logging_fn(
             env=eval_env,
             jit_reset=jit_reset,
             jit_step=jit_step,
             jit_inference_fn=lambda p, obs, rng: jit_logging_inference_fn(p, obs, rng),
             params=params,
-            current_step=current_step,
+            current_step=adjusted_step,
             model_path=model_path,
             episode_length=cfg.train.episode_length,
             render_camera=cfg.logging.render_camera,
             render_fps=cfg.logging.render_fps,
+            render_height=cfg.logging.render_height,
+            render_width=cfg.logging.render_width,
+            render_every=cfg.logging.render_every,
+            eval_count=eval_counter[0],
         )
 
-    # Build training config
+        # Save checkpoint (skip on very first eval call which is at step 0)
+        if checkpointing_enabled and ckpt_mgr is not None and current_step > 0:
+            training_metadata = {
+                "completed_timesteps": adjusted_step,
+                "eval_step": eval_counter[0],
+                "wandb_run_id": wandb.run.id,
+                "run_id": run_id,
+                "mode": cfg.mode,
+            }
+            save_task_transfer_checkpoint(
+                ckpt_mgr=ckpt_mgr,
+                step=eval_counter[0],
+                brax_params=params,
+                frozen_networks=frozen_networks,
+                config=config_dict,
+                training_metadata=training_metadata,
+                checkpoint_callback=checkpoint_callback,
+            )
+
+        eval_counter[0] += 1
+
+    # ----------------------------------------------------------------
+    # Phase 10: Build training config and run
+    # ----------------------------------------------------------------
     training_params = {
-        "num_timesteps": cfg.train.num_timesteps,
+        "num_timesteps": remaining_timesteps,
         "episode_length": cfg.train.episode_length,
         "num_envs": cfg.train.num_envs,
         "batch_size": cfg.train.batch_size,
@@ -339,20 +536,20 @@ def main(cfg: DictConfig) -> None:
         "seed": cfg.train.seed,
     }
 
-    num_evals = int(cfg.train.num_timesteps / cfg.train.eval_every)
+    num_evals = max(int(remaining_timesteps / cfg.train.eval_every), 1)
+    progress_fn = make_wandb_progress_with_offset(step_offset)
 
-    # Create training function
     train_fn = functools.partial(
         brax_ppo.train,
         **training_params,
         num_evals=num_evals,
         network_factory=network_factory,
         restore_checkpoint_path=None,
-        progress_fn=wandb_progress,
+        restore_params=restore_params_for_brax,
+        progress_fn=progress_fn,
         wrap_env_fn=functools.partial(wrapper.wrap_for_brax_training),
     )
 
-    # Run training
     logging.info("Starting training...")
     make_inference_fn, params, _ = train_fn(
         environment=env,
@@ -361,6 +558,35 @@ def main(cfg: DictConfig) -> None:
             policy_params_fn, jit_logging_inference_fn=jit_logging_inference_fn
         ),
     )
+
+    # ----------------------------------------------------------------
+    # Phase 11: Save final checkpoint and cleanup
+    # ----------------------------------------------------------------
+    if checkpointing_enabled and ckpt_mgr is not None:
+        training_metadata = {
+            "completed_timesteps": cfg.train.num_timesteps,
+            "eval_step": eval_counter[0],
+            "wandb_run_id": wandb.run.id,
+            "run_id": run_id,
+            "mode": cfg.mode,
+            "training_complete": True,
+        }
+        save_task_transfer_checkpoint(
+            ckpt_mgr=ckpt_mgr,
+            step=eval_counter[0],
+            brax_params=params,
+            frozen_networks=frozen_networks,
+            config=config_dict,
+            training_metadata=training_metadata,
+            checkpoint_callback=checkpoint_callback,
+        )
+
+    if checkpointing_enabled:
+        try:
+            cleanup_run_state(cfg, model_path_base)
+            logging.info("Training completed successfully, cleaned up run state")
+        except Exception as e:
+            logging.warning(f"Failed to cleanup run state: {e}")
 
     logging.info("Training complete!")
     wandb.finish()

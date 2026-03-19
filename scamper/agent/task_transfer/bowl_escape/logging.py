@@ -25,6 +25,10 @@ def rollout_logging_fn(
     episode_length: int,
     render_camera: str = "close_profile-rodent",
     render_fps: int = 50,
+    render_height: int = 480,
+    render_width: int = 640,
+    render_every: int = 1,
+    eval_count: int = 0,
 ) -> None:
     """Log evaluation rollout video and metrics to wandb.
 
@@ -43,6 +47,10 @@ def rollout_logging_fn(
         episode_length: Number of steps to run in the rollout.
         render_camera: Camera name for rendering.
         render_fps: Frames per second for the output video.
+        render_height: Height in pixels for the output video.
+        render_width: Width in pixels for the output video.
+        render_every: Render video every N evaluation steps.
+        eval_count: Current evaluation count (0-indexed).
 
     Note:
         All metrics are logged with commit=False to batch with other logs.
@@ -58,14 +66,25 @@ def rollout_logging_fn(
         action, _ = jit_inference_fn(params, state.obs, act_rng)
         state = jit_step(state, action)
         rollout.append(state)
+        if state.done:
+            break
 
     # Log reward breakdown per step
     _log_reward_metrics(rollout, current_step)
 
-    # Render and log video
-    _log_rollout_video(
-        env, model_path, current_step, rollout, render_camera, render_fps
-    )
+    # Render video on first eval and every render_every evals thereafter
+    should_render = eval_count == 0 or eval_count % render_every == 0
+    if should_render:
+        _log_rollout_video(
+            env,
+            model_path,
+            current_step,
+            rollout,
+            render_camera,
+            render_fps,
+            render_height,
+            render_width,
+        )
 
 
 def _log_reward_metrics(rollout: list[Any], current_step: int) -> None:
@@ -126,6 +145,8 @@ def _log_rollout_video(
     rollout: list[Any],
     render_camera: str,
     render_fps: int,
+    render_height: int = 480,
+    render_width: int = 640,
 ) -> None:
     """Render rollout video and log to wandb.
 
@@ -136,6 +157,8 @@ def _log_rollout_video(
         rollout: List of environment states from the episode.
         render_camera: Camera name for rendering.
         render_fps: Frames per second for output video.
+        render_height: Height in pixels for output video.
+        render_width: Width in pixels for output video.
     """
     video_path = f"{model_path}/{current_step}.mp4"
 
@@ -146,8 +169,8 @@ def _log_rollout_video(
             frames = env.render(
                 rollout,
                 camera=render_camera,
-                height=480,
-                width=640,
+                height=render_height,
+                width=render_width,
             )
             for frame in frames:
                 writer.append_data(frame)
@@ -171,3 +194,30 @@ def wandb_progress(num_steps: int, metrics: dict[str, Any]) -> None:
     """
     metrics["num_steps"] = num_steps
     wandb.log(metrics)
+
+
+def make_wandb_progress_with_offset(
+    step_offset: int = 0,
+) -> Callable[[int, dict[str, Any]], None]:
+    """Create a wandb progress function with step offset for resume support.
+
+    When resuming from a checkpoint, Brax's internal step counter restarts
+    from 0. This wrapper adds the offset so W&B shows correct cumulative
+    step counts.
+
+    Args:
+        step_offset: Number of timesteps completed in previous runs.
+
+    Returns:
+        Progress function compatible with Brax's ``progress_fn`` callback.
+    """
+
+    def progress_fn(num_steps: int, metrics: dict[str, Any]) -> None:
+        # Skip the initial eval on resume — it duplicates the last pre-preemption eval
+        if num_steps == 0 and step_offset > 0:
+            return
+        adjusted_step = num_steps + step_offset
+        metrics["num_steps"] = adjusted_step
+        wandb.log(metrics)
+
+    return progress_fn

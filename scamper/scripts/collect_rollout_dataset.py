@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """Collect rollout dataset from MLP prior model for discriminator training.
 
-This script generates qpos trajectories from:
+This script generates qpos trajectories and sampled latent vectors from:
 1. Original reference data
 2. Encoder-decoder simulation rollouts
 3. Prior simulation rollouts with varying logvar values
 
 Output H5 always contains:
 - original_qpos: Reference data (num_clips, num_steps, 74)
-- encoder_decoder_qpos: Encoder-decoder rollouts
-- prior_deterministic_qpos: Prior rollouts using mean (no sampling)
-- prior_predicted_logvar_qpos: Prior rollouts using network-predicted logvar
+- encoder_decoder_qpos / encoder_decoder_latents: Encoder-decoder rollouts
+- prior_deterministic_qpos / prior_deterministic_latents: Prior rollouts using mean (no sampling)
+- prior_predicted_logvar_qpos / prior_predicted_logvar_latents: Prior rollouts using network-predicted logvar
 
 Additionally, for each logvar value specified via --logvars:
-- prior_logvar_X_qpos: Prior rollouts with the specified fixed logvar
+- prior_logvar_X_qpos / prior_logvar_X_latents: Prior rollouts with the specified fixed logvar
 """
 
 import argparse
@@ -378,6 +378,7 @@ def create_batched_rollout_fn(
     proprioceptive_obs_size: int,
     reference_obs_size: int,
     is_prior_policy: bool,
+    intention_size: int,
 ) -> Callable:
     """Create a batched rollout function for multiple clips.
 
@@ -388,9 +389,11 @@ def create_batched_rollout_fn(
         proprioceptive_obs_size: Size of proprioceptive observations.
         reference_obs_size: Size of reference/imitation_target observations.
         is_prior_policy: If True, pass only proprioceptive obs to policy.
+        intention_size: Dimension of the latent intention vector.
 
     Returns:
-        A function that takes (initial_qpos_batch, clip_indices, rng_keys) and returns qpos trajectories.
+        A function that takes (initial_qpos_batch, clip_indices, rng_keys) and
+        returns (qpos_trajectories, latents_trajectories).
     """
     jit_step = jax.jit(env.step)
     jit_reset = jax.jit(env.reset)
@@ -398,8 +401,8 @@ def create_batched_rollout_fn(
 
     def single_rollout(
         initial_qpos: jax.Array, clip_idx: int, rng_key: jax.Array
-    ) -> jax.Array:
-        """Run single rollout from initial_qpos, return qpos trajectory."""
+    ) -> Tuple[jax.Array, jax.Array]:
+        """Run single rollout from initial_qpos, return qpos and latents trajectories."""
         reset_key, rollout_key = random.split(rng_key)
 
         # Reset environment to get proper state structure at specific clip
@@ -410,9 +413,6 @@ def create_batched_rollout_fn(
         data = data.replace(qvel=jnp.zeros(mjx_model.nv))
         data = mjx.forward(mjx_model, data)
         state = state.replace(data=data)
-
-        # Collect initial qpos
-        qpos_list = [initial_qpos]
 
         def step_fn(carry, _):
             state, key = carry
@@ -430,26 +430,33 @@ def create_batched_rollout_fn(
                     "proprioception": state.obs[..., reference_obs_size:],
                 }
 
-            # Get action from policy
-            action, _ = policy_fn(obs, action_key)
+            # Get action and extras (including sampled latent) from policy
+            action, extras = policy_fn(obs, action_key)
+            z = extras["intention"]
 
             # Step environment
             next_state = jit_step(state, action)
 
-            return (next_state, key), next_state.data.qpos
+            return (next_state, key), (next_state.data.qpos, z)
 
         # Run rollout for num_steps - 1 (we already have initial qpos)
         initial_carry = (state, rollout_key)
-        _, qpos_trajectory = jax.lax.scan(
+        _, (qpos_trajectory, latents_trajectory) = jax.lax.scan(
             step_fn, initial_carry, None, length=num_steps - 1
         )
 
-        # Prepend initial qpos
+        # Prepend initial qpos and zeros for latent (no policy call at t=0)
         qpos_trajectory = jnp.concatenate(
             [initial_qpos[None, :], qpos_trajectory], axis=0
         )
+        latents_trajectory = jnp.concatenate(
+            [jnp.zeros((1, intention_size)), latents_trajectory], axis=0
+        )
 
-        return qpos_trajectory  # (num_steps, 74)
+        return (
+            qpos_trajectory,
+            latents_trajectory,
+        )  # (num_steps, 74), (num_steps, intention_size)
 
     # Vmap over batch of clips
     batched_rollout = jax.jit(jax.vmap(single_rollout))
@@ -466,10 +473,11 @@ def collect_rollouts(
     batch_size: int,
     proprioceptive_obs_size: int,
     reference_obs_size: int,
+    intention_size: int,
     is_prior_policy: bool,
     rng_key: jax.Array,
     desc: str = "Collecting rollouts",
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Collect rollouts for all clips.
 
     Args:
@@ -481,12 +489,14 @@ def collect_rollouts(
         batch_size: Clips per batch.
         proprioceptive_obs_size: Size of proprioceptive observations.
         reference_obs_size: Size of reference/imitation_target observations.
+        intention_size: Dimension of the latent intention vector.
         is_prior_policy: If True, pass only proprioceptive obs to policy.
         rng_key: Random key.
         desc: Progress bar description.
 
     Returns:
-        qpos array of shape (num_clips, num_steps, qpos_dim).
+        Tuple of (qpos, latents) arrays with shapes
+        (num_clips, num_steps, qpos_dim) and (num_clips, num_steps, intention_size).
     """
     batched_rollout = create_batched_rollout_fn(
         env,
@@ -495,9 +505,11 @@ def collect_rollouts(
         proprioceptive_obs_size,
         reference_obs_size,
         is_prior_policy,
+        intention_size,
     )
 
     all_qpos = []
+    all_latents = []
     num_batches = (num_clips + batch_size - 1) // batch_size
 
     for batch_idx in tqdm(range(num_batches), desc=desc):
@@ -521,12 +533,15 @@ def collect_rollouts(
         batch_keys = random.split(batch_key, actual_batch_size)
 
         # Run batched rollouts
-        qpos_batch = batched_rollout(initial_qpos_batch, clip_indices, batch_keys)
+        qpos_batch, latents_batch = batched_rollout(
+            initial_qpos_batch, clip_indices, batch_keys
+        )
 
         # Transfer to CPU and append
         all_qpos.append(np.array(qpos_batch))
+        all_latents.append(np.array(latents_batch))
 
-    return np.concatenate(all_qpos, axis=0)
+    return np.concatenate(all_qpos, axis=0), np.concatenate(all_latents, axis=0)
 
 
 def get_original_qpos(reference_clips: ReferenceClips) -> np.ndarray:
@@ -546,21 +561,25 @@ def save_results(
     output_path: str,
     original_qpos: np.ndarray,
     results: Dict[str, np.ndarray],
+    latents_results: Dict[str, np.ndarray],
     checkpoint_path: str,
     num_clips: int,
     num_steps: int,
     logvars: Sequence[float],
+    intention_size: int,
 ) -> None:
     """Save all rollout data to H5 file.
 
     Args:
         output_path: Path to output H5 file.
         original_qpos: Original reference qpos.
-        results: Dictionary with rollout arrays.
+        results: Dictionary mapping rollout name to qpos arrays.
+        latents_results: Dictionary mapping rollout name to latents arrays.
         checkpoint_path: Path to source checkpoint.
         num_clips: Number of clips.
         num_steps: Steps per clip.
         logvars: List of logvar values used for non-deterministic rollouts.
+        intention_size: Dimension of the latent intention vector.
     """
     # Create output directory if needed
     output_dir = Path(output_path).parent
@@ -570,15 +589,17 @@ def save_results(
         # Original reference data
         f.create_dataset("original_qpos", data=original_qpos, dtype="float32")
 
-        # Rollout results
+        # Rollout results (qpos and latents)
         for name, data in results.items():
-            dataset_name = f"{name}_qpos"
-            f.create_dataset(dataset_name, data=data, dtype="float32")
+            f.create_dataset(f"{name}_qpos", data=data, dtype="float32")
+        for name, data in latents_results.items():
+            f.create_dataset(f"{name}_latents", data=data, dtype="float32")
 
         # Metadata
         f.attrs["num_clips"] = num_clips
         f.attrs["num_steps"] = num_steps
         f.attrs["qpos_dim"] = original_qpos.shape[-1]
+        f.attrs["intention_size"] = intention_size
         f.attrs["checkpoint_path"] = checkpoint_path
         f.attrs["logvars"] = list(logvars)
 
@@ -634,8 +655,10 @@ def main():
 
     # Initialize random key
     rng = random.PRNGKey(args.seed)
+    intention_size = int(cfg.network_config.intention_size)
 
     results = {}
+    latents_results = {}
 
     # 1. Get original qpos
     print("\n" + "=" * 60)
@@ -651,7 +674,7 @@ def main():
     enc_dec_policy = create_encoder_decoder_policy(policy_params, cfg)
     rng, key = random.split(rng)
     t_start = time.time()
-    results["encoder_decoder"] = collect_rollouts(
+    results["encoder_decoder"], latents_results["encoder_decoder"] = collect_rollouts(
         env,
         reference_clips,
         enc_dec_policy,
@@ -660,12 +683,14 @@ def main():
         args.batch_size,
         proprioceptive_obs_size,
         reference_obs_size,
+        intention_size,
         is_prior_policy=False,
         rng_key=key,
         desc="Encoder-decoder",
     )
     print(f"  Completed in {time.time() - t_start:.1f}s")
-    print(f"  Shape: {results['encoder_decoder'].shape}")
+    print(f"  qpos shape: {results['encoder_decoder'].shape}")
+    print(f"  latents shape: {latents_results['encoder_decoder'].shape}")
 
     # 3. Prior rollouts deterministic (always collected)
     print("\n" + "=" * 60)
@@ -676,21 +701,25 @@ def main():
     )
     rng, key = random.split(rng)
     t_start = time.time()
-    results["prior_deterministic"] = collect_rollouts(
-        env,
-        reference_clips,
-        prior_policy_det,
-        num_clips,
-        num_steps,
-        args.batch_size,
-        proprioceptive_obs_size,
-        reference_obs_size,
-        is_prior_policy=True,
-        rng_key=key,
-        desc="Prior (deterministic)",
+    results["prior_deterministic"], latents_results["prior_deterministic"] = (
+        collect_rollouts(
+            env,
+            reference_clips,
+            prior_policy_det,
+            num_clips,
+            num_steps,
+            args.batch_size,
+            proprioceptive_obs_size,
+            reference_obs_size,
+            intention_size,
+            is_prior_policy=True,
+            rng_key=key,
+            desc="Prior (deterministic)",
+        )
     )
     print(f"  Completed in {time.time() - t_start:.1f}s")
-    print(f"  Shape: {results['prior_deterministic'].shape}")
+    print(f"  qpos shape: {results['prior_deterministic'].shape}")
+    print(f"  latents shape: {latents_results['prior_deterministic'].shape}")
 
     # 4. Prior rollouts with predicted logvar (always collected)
     print("\n" + "=" * 60)
@@ -701,21 +730,25 @@ def main():
     )
     rng, key = random.split(rng)
     t_start = time.time()
-    results["prior_predicted_logvar"] = collect_rollouts(
-        env,
-        reference_clips,
-        prior_policy_predicted,
-        num_clips,
-        num_steps,
-        args.batch_size,
-        proprioceptive_obs_size,
-        reference_obs_size,
-        is_prior_policy=True,
-        rng_key=key,
-        desc="Prior (predicted logvar)",
+    results["prior_predicted_logvar"], latents_results["prior_predicted_logvar"] = (
+        collect_rollouts(
+            env,
+            reference_clips,
+            prior_policy_predicted,
+            num_clips,
+            num_steps,
+            args.batch_size,
+            proprioceptive_obs_size,
+            reference_obs_size,
+            intention_size,
+            is_prior_policy=True,
+            rng_key=key,
+            desc="Prior (predicted logvar)",
+        )
     )
     print(f"  Completed in {time.time() - t_start:.1f}s")
-    print(f"  Shape: {results['prior_predicted_logvar'].shape}")
+    print(f"  qpos shape: {results['prior_predicted_logvar'].shape}")
+    print(f"  latents shape: {latents_results['prior_predicted_logvar'].shape}")
 
     # 5. Prior rollouts with specified fixed logvar values (configurable)
     for logvar in args.logvars:
@@ -734,7 +767,7 @@ def main():
             if logvar == int(logvar)
             else f"prior_logvar_{logvar}"
         )
-        results[key_name] = collect_rollouts(
+        results[key_name], latents_results[key_name] = collect_rollouts(
             env,
             reference_clips,
             prior_policy,
@@ -743,12 +776,14 @@ def main():
             args.batch_size,
             proprioceptive_obs_size,
             reference_obs_size,
+            intention_size,
             is_prior_policy=True,
             rng_key=key,
             desc=f"Prior (logvar={logvar})",
         )
         print(f"  Completed in {time.time() - t_start:.1f}s")
-        print(f"  Shape: {results[key_name].shape}")
+        print(f"  qpos shape: {results[key_name].shape}")
+        print(f"  latents shape: {latents_results[key_name].shape}")
 
     # Save results
     print("\n" + "=" * 60)
@@ -758,10 +793,12 @@ def main():
         args.output_path,
         original_qpos,
         results,
+        latents_results,
         args.checkpoint_path,
         num_clips,
         num_steps,
         args.logvars,
+        intention_size,
     )
 
     # Summary
@@ -772,7 +809,9 @@ def main():
     print(f"Datasets:")
     print(f"  - original_qpos: {original_qpos.shape}")
     for name, data in results.items():
-        print(f"  - {name}_qpos: {data.shape}")
+        print(
+            f"  - {name}_qpos: {data.shape}  |  {name}_latents: {latents_results[name].shape}"
+        )
     print("\nDone!")
 
 

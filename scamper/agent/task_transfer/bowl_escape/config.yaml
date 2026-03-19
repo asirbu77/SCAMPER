@@ -33,8 +33,9 @@ prior_decoder:
   noise_logvar: -2.0
 
 scratch:
-  # No extra config needed for scratch mode - uses network settings below
-  _placeholder: true
+  # Actuator type: true = torque (matches imitation training), false = PD actuators
+  # Only applies in scratch mode. decoder_only and prior_decoder always use torque.
+  torque_actuators: true
 
 # Network architecture
 network:
@@ -67,13 +68,23 @@ train:
 env:
   xml_variant: "limited-collisions"  # 'full-collisions', 'limited-collisions', or 'no-tail-collisions'
   mujoco_impl: "jax"  # 'jax' or 'warp'
-  target_speed: 1.0
   # Sliding friction for bowl heightfield (MuJoCo default is 1.0, rodent paws have 1.5)
   hfield_friction: 1.0
   # Reward term weights (from vnl_playground bowl_escape task)
   reward_weights:
-    escape_x_upright: 1.0
-    speed: 1.0
+    escape: 1.0
+    escape_bonus: 500.0
+  # Termination criteria
+  termination_criteria:
+    fallen: {}
+    escaped: {}
+    nan_termination: {}
+
+# Checkpointing settings
+checkpointing:
+  enabled: true
+  model_path: "./scratch/bowl_escape_checkpoints"  # Base directory (run_id subdir created under this)
+  max_to_keep: null
 
 # Logging settings
 logging:
@@ -82,3 +93,6 @@ logging:
   exp_name: "bowl_escape_transfer"
   render_camera: "close_profile-rodent"
   render_fps: 50
+  render_height: 480
+  render_width: 640
+  render_every: 1  # Render video every N evaluation steps (always renders first eval)
