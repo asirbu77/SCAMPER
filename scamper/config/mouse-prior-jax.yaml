@@ -122,12 +122,12 @@ train_setup:
   checkpoint_to_restore: null
   restore_from_run_state: null
   train_subset_ratio: 0.8
-  eval_every: 50_000_000
-  reset_every: 50_000_000
+  eval_every: 100_000
+  reset_every: 100_000
 
   train_config:
     num_envs: 4096
-    num_timesteps: 1_000_000_000
+    num_timesteps: 5_000_000
     batch_size: 1024
     num_minibatches: 16
     num_updates_per_batch: 4
