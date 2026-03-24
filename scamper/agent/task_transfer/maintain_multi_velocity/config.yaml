@@ -78,6 +78,9 @@ env:
     lateral_velocity: 0.5
     angular_velocity_z: 0.1
     control_diff_cost: 0.0
+    control_cost: 0.0
+    energy_cost: 0.0
+  energy_cost_max_value: 50.0
 
 # Evaluation settings
 eval:

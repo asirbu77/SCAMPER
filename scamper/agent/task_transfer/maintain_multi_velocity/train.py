@@ -199,6 +199,11 @@ def main(cfg: DictConfig) -> None:
         "lateral_velocity": {"weight": cfg.env.reward_weights.lateral_velocity},
         "angular_velocity_z": {"weight": cfg.env.reward_weights.angular_velocity_z},
         "control_diff_cost": {"weight": cfg.env.reward_weights.control_diff_cost},
+        "control_cost": {"weight": cfg.env.reward_weights.control_cost},
+        "energy_cost": {
+            "weight": cfg.env.reward_weights.energy_cost,
+            "max_value": cfg.env.energy_cost_max_value,
+        },
     }
     logging.info(
         f"Environment config: ctrl_dt={env_cfg.ctrl_dt}, "
@@ -207,7 +212,9 @@ def main(cfg: DictConfig) -> None:
     logging.info(
         f"Reward weights: forward_velocity={cfg.env.reward_weights.forward_velocity}, "
         f"lateral_velocity={cfg.env.reward_weights.lateral_velocity}, "
-        f"angular_velocity_z={cfg.env.reward_weights.angular_velocity_z}"
+        f"angular_velocity_z={cfg.env.reward_weights.angular_velocity_z}, "
+        f"control_cost={cfg.env.reward_weights.control_cost}, "
+        f"energy_cost={cfg.env.reward_weights.energy_cost}"
     )
 
     # Set actuator type: scratch mode can optionally use PD actuators;
