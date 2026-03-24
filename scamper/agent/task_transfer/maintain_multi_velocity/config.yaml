@@ -81,6 +81,7 @@ env:
     control_cost: 0.0
     energy_cost: 0.0
   energy_cost_max_value: 50.0
+  max_y: 0.15  # Terminate episode if |y| exceeds this (meters)
 
 # Evaluation settings
 eval:
