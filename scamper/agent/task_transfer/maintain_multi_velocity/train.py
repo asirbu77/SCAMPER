@@ -198,6 +198,7 @@ def main(cfg: DictConfig) -> None:
         "forward_velocity": {"weight": cfg.env.reward_weights.forward_velocity},
         "lateral_velocity": {"weight": cfg.env.reward_weights.lateral_velocity},
         "angular_velocity_z": {"weight": cfg.env.reward_weights.angular_velocity_z},
+        "control_diff_cost": {"weight": cfg.env.reward_weights.control_diff_cost},
     }
     logging.info(
         f"Environment config: ctrl_dt={env_cfg.ctrl_dt}, "
