@@ -673,21 +673,22 @@ def _resolve_path(path: str | Path) -> str:
     return str(path_obj)
 
 
-def load_from_run_state_prior(
+def _load_from_run_state_with_prefix(
     cfg: DictConfig,
+    step_prefix: str,
 ) -> tuple[str, str, dict[str, Any] | None]:
-    """Load or create run state for prior training, handling preemption and manual restoration.
+    """Load or create run state with a given step prefix.
 
-    Similar to load_from_run_state but uses PriorNetwork step prefix.
+    Generic implementation shared by prior and distill run state loading.
 
     Args:
         cfg: Current configuration.
+        step_prefix: Orbax step prefix (e.g. "PriorNetwork", "DistillNetwork").
 
     Returns:
         Tuple of (run_id, checkpoint_path, existing_run_state).
     """
-    # Check for existing run state
-    existing_run_state = discover_existing_run_state(cfg, step_prefix="PriorNetwork")
+    existing_run_state = discover_existing_run_state(cfg, step_prefix=step_prefix)
 
     if existing_run_state:
         run_id = existing_run_state["run_id"]
@@ -725,3 +726,23 @@ def load_from_run_state_prior(
     logging.info(f"Training checkpoint path: {checkpoint_path}")
 
     return (run_id, checkpoint_path, existing_run_state)
+
+
+def load_from_run_state_prior(
+    cfg: DictConfig,
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Load or create run state for prior training.
+
+    Uses PriorNetwork step prefix.
+    """
+    return _load_from_run_state_with_prefix(cfg, step_prefix="PriorNetwork")
+
+
+def load_from_run_state_distill(
+    cfg: DictConfig,
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Load or create run state for distillation training.
+
+    Uses DistillNetwork step prefix.
+    """
+    return _load_from_run_state_with_prefix(cfg, step_prefix="DistillNetwork")
