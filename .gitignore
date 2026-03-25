@@ -9,6 +9,7 @@ jax_cache/
 results/
 scratch
 notebooks/plots/
+pdfs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
