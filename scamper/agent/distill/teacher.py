@@ -25,7 +25,7 @@ from scamper.agent.observation_utils import (
 def load_frozen_teacher(
     checkpoint_path: str,
     step: int | None = None,
-) -> tuple[Callable, DictRunningStatisticsState, dict]:
+) -> tuple[Callable, DictRunningStatisticsState, dict, Any]:
     """Load a trained imitation_mlp teacher from checkpoint.
 
     Args:
@@ -33,8 +33,10 @@ def load_frozen_teacher(
         step: Specific step to load. None = latest.
 
     Returns:
-        Tuple of (teacher_query_fn, teacher_normalizer_params, teacher_config).
-        teacher_query_fn: (obs_dict, normalizer_params) -> action_params [B, 76].
+        Tuple of (teacher_query_fn, teacher_normalizer_params, teacher_config,
+                  teacher_policy_params).
+        teacher_query_fn: (normalized_obs_dict) -> action_params [B, 76].
+        teacher_policy_params: Raw Flax params for use with MLPPolicy.apply().
     """
     # Load config
     mgr_options = ocp.CheckpointManagerOptions(create=False, step_prefix="PPONetwork")
@@ -98,7 +100,7 @@ def load_frozen_teacher(
     teacher_fn = make_teacher_query_fn(mlp_module, teacher_params)
 
     config_dict = OmegaConf.to_container(cfg, resolve=True)
-    return teacher_fn, teacher_normalizer, config_dict
+    return teacher_fn, teacher_normalizer, config_dict, teacher_params
 
 
 def make_teacher_query_fn(

@@ -39,6 +39,10 @@ from scamper.agent.distill.distill_networks import (
     make_student_inference_fn,
 )
 from scamper.agent.distill.teacher import load_frozen_teacher, make_teacher_query_fn
+from scamper.agent.imitation_mlp.ppo_networks import (
+    make_inference_fn as make_mlp_inference_fn,
+    make_mlp_ppo_networks,
+)
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,
@@ -173,8 +177,8 @@ def train(
 
     # --- Load frozen teacher ---
     logging.info(f"Loading teacher from: {teacher_checkpoint_path}")
-    teacher_fn, teacher_normalizer_params, teacher_cfg = load_frozen_teacher(
-        teacher_checkpoint_path, step=teacher_checkpoint_step
+    teacher_fn, teacher_normalizer_params, teacher_cfg, teacher_raw_params = (
+        load_frozen_teacher(teacher_checkpoint_path, step=teacher_checkpoint_step)
     )
     teacher_obs_sizes = teacher_cfg["network_config"]["obs_sizes"]
     action_size = teacher_cfg["network_config"]["action_size"]
@@ -513,6 +517,23 @@ def train(
             key=eval_key,
         )
 
+    # --- Teacher evaluator (for baseline reward comparison) ---
+    teacher_mlp_networks = make_mlp_ppo_networks(
+        obs_sizes=obs_sizes,
+        action_size=action_size,
+        mlp_hidden_layer_sizes=tuple(teacher_cfg["network_config"]["mlp_layer_sizes"]),
+    )
+    teacher_make_policy = make_mlp_inference_fn(teacher_mlp_networks)
+    teacher_policy_params = (teacher_normalizer_params, teacher_raw_params)
+    teacher_evaluator = acting.Evaluator(
+        eval_env,
+        functools.partial(teacher_make_policy, deterministic=True),
+        num_eval_envs=num_eval_envs,
+        episode_length=episode_length,
+        action_repeat=action_repeat,
+        key=eval_key,
+    )
+
     # --- Helper: create checkpoint params ---
     def get_policy_params(training_state):
         ts = _unpmap(training_state)
@@ -558,12 +579,33 @@ def train(
         f"Starting at iteration: {start_it} with {num_evals_after_init} evals left"
     )
 
+    # --- Evaluate teacher once (constant baseline) ---
+    teacher_baseline_metrics = {}
+    if process_id == 0:
+        logging.info("Evaluating teacher baseline reward")
+        teacher_eval_metrics = teacher_evaluator.run_evaluation(
+            teacher_policy_params,
+            training_metrics={},
+        )
+        teacher_baseline_metrics = {
+            k.replace("eval/", "eval/teacher/", 1): v
+            for k, v in teacher_eval_metrics.items()
+            if k.startswith("eval/") and not k.endswith("_std")
+        }
+        logging.info(
+            f"Teacher baseline reward: "
+            f"{teacher_eval_metrics.get('eval/episode_reward', 'N/A')}"
+        )
+
     # --- Initial eval ---
     metrics = {}
     if process_id == 0 and num_evals > 1 and start_it == 0:
         logging.info("Running initial evaluation")
         policy_param = get_policy_params(training_state)
         ts = _unpmap(training_state)
+
+        # Teacher baseline (constant, logged every step for easy comparison)
+        metrics.update(teacher_baseline_metrics)
 
         # Eval on train set
         eval_metrics = evaluator.run_evaluation(
@@ -657,6 +699,9 @@ def train(
             ts = _unpmap(training_state)
 
             metrics = training_metrics.copy()
+
+            # Teacher baseline (constant, logged every step for easy comparison)
+            metrics.update(teacher_baseline_metrics)
 
             # Eval on train set (tracking reward)
             eval_metrics = evaluator.run_evaluation(

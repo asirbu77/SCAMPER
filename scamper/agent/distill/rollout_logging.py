@@ -146,7 +146,7 @@ def _render_teacher_video(
     from brax.training import distribution
 
     try:
-        teacher_fn, teacher_normalizer, _ = load_frozen_teacher(
+        teacher_fn, teacher_normalizer, _, _ = load_frozen_teacher(
             cfg.teacher_config.checkpoint_path,
             step=cfg.teacher_config.checkpoint_step,
         )

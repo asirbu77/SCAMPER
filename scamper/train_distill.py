@@ -110,7 +110,7 @@ def main(cfg: DictConfig):
     logging.info("Using DAgger Distillation Pipeline")
 
     # Load teacher to extract obs/action sizes for config
-    _, teacher_normalizer, teacher_cfg = load_frozen_teacher(
+    _, teacher_normalizer, teacher_cfg, _ = load_frozen_teacher(
         cfg.teacher_config.checkpoint_path,
         step=cfg.teacher_config.checkpoint_step,
     )
