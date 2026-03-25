@@ -185,9 +185,10 @@ def compute_distill_loss(
     # [B, T, ...] -> [T, B, ...]
     data = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), data)
 
-    T, B = data.observation["proprioception"].shape[:2]
+    # Get T, B from discount (always a plain array, shape [T, B])
+    T, B = data.discount.shape[:2]
 
-    # Normalize observations for student
+    # Flatten nested obs dicts, then merge time and batch: [T, B, ...] -> [T*B, ...]
     obs_flat = jax.tree_util.tree_map(
         lambda x: x.reshape(-1, *x.shape[2:]), data.observation
     )
