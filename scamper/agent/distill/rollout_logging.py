@@ -2,11 +2,6 @@
 
 Logs to wandb:
 - Teacher vs student side-by-side videos with ghost overlay
-- Per-reward-term breakdowns for the student rollout
-- Prior rollout videos at various noise levels
-- Encoder and prior latent statistics per dimension
-- KL(encoder || prior) per timestep
-- Teacher-student action MSE
 """
 
 import logging
@@ -19,19 +14,13 @@ import wandb
 from omegaconf import DictConfig
 
 from scamper.agent.distill.distill_networks import (
-    DistillDecoder,
-    DistillEncoder,
     DistillNetworkParams,
-    DistillPrior,
-    reparameterize,
 )
-from scamper.agent.distill.losses import compute_encoder_prior_kl_loss
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     flatten_obs_dict,
     normalize_dict_obs,
 )
-from scamper.agent.wandb_logging import log_lineplot_to_wandb
 
 
 def distill_rollout_logging_fn(
@@ -50,6 +39,8 @@ def distill_rollout_logging_fn(
 ) -> None:
     """Rollout logging for DAgger distillation.
 
+    Renders teacher and student rollout videos on the same clip for comparison.
+
     Args:
         env: Rollout environment.
         jit_reset: JIT-compiled reset function.
@@ -64,11 +55,13 @@ def distill_rollout_logging_fn(
         reset_key: Random key for environment reset.
         render_video: Whether to render videos.
     """
+    if not render_video:
+        return
+
     from scamper.agent.distill.distill_networks import (
         make_distill_networks,
         make_logging_inference_fn,
     )
-    from scamper.agent.distill.teacher import load_frozen_teacher
 
     # Compute episode length
     physics_step_per_control_step = cfg.env_config.ctrl_dt / cfg.env_config.sim_dt
@@ -101,9 +94,6 @@ def distill_rollout_logging_fn(
     # --- Student rollout ---
     state = jit_reset(reset_key)
     rollout = [state]
-    encoder_means = []
-    encoder_logvars = []
-    student_logits_list = []
 
     _, act_rng = jax.random.split(policy_params_fn_key)
 
@@ -115,139 +105,17 @@ def distill_rollout_logging_fn(
         )
         ctrl = jnp.squeeze(ctrl, axis=0) if ctrl.shape[0] == 1 else ctrl
 
-        encoder_means.append(extras["latent_mean"])
-        encoder_logvars.append(extras["latent_logvar"])
-        student_logits_list.append(extras["logits"])
-
         state = jit_step(state, ctrl)
         rollout.append(state)
 
-    # Stack encoder latents
-    encoder_means = jnp.stack(encoder_means)
-    encoder_logvars = jnp.stack(encoder_logvars)
-    student_logits = jnp.stack(student_logits_list)
+    # --- Render student video ---
+    _render_student_video(env, cfg, model_path, current_step, rollout)
 
-    # --- Compute prior latent statistics ---
-    prior_means = []
-    prior_logvars = []
-
-    for i in range(len(rollout) - 1):
-        obs = rollout[i].obs
-        flat_obs = flatten_obs_dict(obs)
-        normalized_obs = normalize_dict_obs(flat_obs, normalizer_params)
-        proprio_obs = normalized_obs["proprioception"]
-        p_mean, p_logvar = prior.apply(network_params.prior, proprio_obs)
-        prior_means.append(p_mean)
-        prior_logvars.append(p_logvar)
-
-    prior_means = jnp.stack(prior_means)
-    prior_logvars = jnp.stack(prior_logvars)
-
-    # --- Compute teacher action MSE ---
-    teacher_action_mse = None
+    # --- Render teacher video on same clip ---
     if cfg.teacher_config.checkpoint_path is not None:
-        try:
-            teacher_fn, teacher_normalizer, _ = load_frozen_teacher(
-                cfg.teacher_config.checkpoint_path,
-                step=cfg.teacher_config.checkpoint_step,
-            )
-            teacher_logits_list = []
-            for i in range(len(rollout) - 1):
-                obs = rollout[i].obs
-                flat_obs = flatten_obs_dict(obs)
-                teacher_norm = normalize_dict_obs(flat_obs, teacher_normalizer)
-                t_logits = teacher_fn(teacher_norm)
-                teacher_logits_list.append(t_logits)
-            teacher_logits = jnp.stack(teacher_logits_list)
-            teacher_action_mse = float(
-                jnp.mean(jnp.square(student_logits - teacher_logits))
-            )
-        except Exception as e:
-            logging.warning(f"Failed to compute teacher-student MSE: {e}")
-
-    # --- Log latent statistics per dimension ---
-    enc_means_mean = jnp.mean(encoder_means, axis=0)
-    enc_means_std = jnp.std(encoder_means, axis=0)
-    enc_logvars_mean = jnp.mean(encoder_logvars, axis=0)
-    enc_logvars_std = jnp.std(encoder_logvars, axis=0)
-
-    pri_means_mean = jnp.mean(prior_means, axis=0)
-    pri_means_std = jnp.std(prior_means, axis=0)
-    pri_logvars_mean = jnp.mean(prior_logvars, axis=0)
-    pri_logvars_std = jnp.std(prior_logvars, axis=0)
-
-    for i in range(enc_means_mean.shape[-1]):
-        wandb.log(
-            {
-                f"latents/encoder_means_mean{i}": float(enc_means_mean[i]),
-                f"latents/encoder_means_std{i}": float(enc_means_std[i]),
-                f"latents/encoder_logvars_mean{i}": float(enc_logvars_mean[i]),
-                f"latents/encoder_logvars_std{i}": float(enc_logvars_std[i]),
-                f"latents/prior_means_mean{i}": float(pri_means_mean[i]),
-                f"latents/prior_means_std{i}": float(pri_means_std[i]),
-                f"latents/prior_logvars_mean{i}": float(pri_logvars_mean[i]),
-                f"latents/prior_logvars_std{i}": float(pri_logvars_std[i]),
-            },
-            commit=False,
+        _render_teacher_video(
+            env, jit_reset, jit_step, cfg, model_path, current_step, reset_key
         )
-
-    # Log KL per timestep
-    kl_per_step = []
-    for t in range(len(encoder_means)):
-        kl = compute_encoder_prior_kl_loss(
-            encoder_means[t : t + 1],
-            encoder_logvars[t : t + 1],
-            prior_means[t : t + 1],
-            prior_logvars[t : t + 1],
-        )
-        kl_per_step.append(float(kl))
-
-    log_lineplot_to_wandb(
-        name="eval/kl_per_step",
-        metric_name="kl",
-        data=list(enumerate(kl_per_step)),
-        title="KL(encoder||prior) per rollout step",
-    )
-
-    # Log teacher-student action MSE
-    if teacher_action_mse is not None:
-        wandb.log(
-            {"eval/teacher_student_action_mse": teacher_action_mse},
-            commit=False,
-        )
-
-    # --- Render videos ---
-    if render_video:
-        _render_student_video(
-            env,
-            cfg,
-            model_path,
-            current_step,
-            rollout,
-        )
-
-        # Render teacher rollout on same clip for comparison
-        if cfg.teacher_config.checkpoint_path is not None:
-            _render_teacher_video(
-                env,
-                jit_reset,
-                jit_step,
-                cfg,
-                model_path,
-                current_step,
-                reset_key,
-            )
-
-        # Log per-reward-term breakdowns for student
-        if hasattr(env, "_config") and hasattr(env._config, "reward_terms"):
-            for metric_key in env._config.reward_terms.keys():
-                metric_name = f"rewards/{metric_key}"
-                log_lineplot_to_wandb(
-                    name=f"eval/rollout_{metric_name}",
-                    metric_name=metric_name,
-                    data=list(enumerate([s.metrics[metric_name] for s in rollout])),
-                    title=f"{metric_name} per rollout frame",
-                )
 
 
 def _render_student_video(env, cfg, model_path, current_step, rollout):
@@ -275,7 +143,7 @@ def _render_teacher_video(
 ):
     """Render teacher rollout on the same clip for comparison."""
     from scamper.agent.distill.teacher import load_frozen_teacher
-    from scamper.agent.observation_utils import concat_flat_dict_obs
+    from brax.training import distribution
 
     try:
         teacher_fn, teacher_normalizer, _ = load_frozen_teacher(
@@ -287,8 +155,6 @@ def _render_teacher_video(
         return
 
     action_size = cfg.network_config.action_size
-    from brax.training import distribution
-
     action_dist = distribution.NormalTanhDistribution(event_size=action_size)
 
     # Run teacher rollout on same clip

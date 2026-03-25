@@ -579,7 +579,11 @@ def train(
                 training_metrics={},
             )
             metrics.update(
-                {f"eval/{k}_test": v for k, v in test_metrics.items() if "eval" in k}
+                {
+                    k.replace("eval/", "eval/test_set/", 1): v
+                    for k, v in test_metrics.items()
+                    if k.startswith("eval/")
+                }
             )
 
         # Generate shared reset key for all rollouts
