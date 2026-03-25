@@ -137,11 +137,13 @@ def create_ramp_schedule(
 
 def compute_distill_loss(
     params: DistillNetworkParams,
-    teacher_fn: Callable,
-    teacher_normalizer_params: DictRunningStatisticsState,
     normalizer_params: DictRunningStatisticsState,
     data: Any,
     rng: jnp.ndarray,
+    step: int,
+    *,
+    teacher_fn: Callable,
+    teacher_normalizer_params: DictRunningStatisticsState,
     encoder: DistillEncoder,
     decoder: DistillDecoder,
     prior: DistillPrior,
@@ -149,20 +151,24 @@ def compute_distill_loss(
     ar1_weight: float,
     kl_schedule_fn: Callable | None,
     ar1_schedule_fn: Callable | None,
-    step: int,
 ) -> tuple[jnp.ndarray, dict]:
     """Compute the full distillation loss.
+
+    The first five positional args match what gradient_update_fn passes from
+    minibatch_step: (params, normalizer_params, data, rng, step).
+    All remaining args are keyword-only and supplied via functools.partial.
 
     Data arrives as [B, T, ...]. We swap to [T, B, ...] for temporal loss,
     then merge to [T*B, ...] for the main losses.
 
     Args:
         params: Trainable DistillNetworkParams (encoder, decoder, prior).
-        teacher_fn: Frozen teacher query function (normalized_obs -> action_params).
-        teacher_normalizer_params: Teacher's observation normalizer.
         normalizer_params: Student's observation normalizer.
         data: Transition data with shape [B, T].
         rng: Random key.
+        step: Current training step.
+        teacher_fn: Frozen teacher query function (normalized_obs -> action_params).
+        teacher_normalizer_params: Teacher's observation normalizer.
         encoder: DistillEncoder module.
         decoder: DistillDecoder module.
         prior: DistillPrior module.
@@ -170,7 +176,6 @@ def compute_distill_loss(
         ar1_weight: Base weight for AR(1) loss.
         kl_schedule_fn: Optional schedule for KL weight.
         ar1_schedule_fn: Optional schedule for AR(1) weight.
-        step: Current training step.
 
     Returns:
         Tuple of (total_loss, metrics_dict).
