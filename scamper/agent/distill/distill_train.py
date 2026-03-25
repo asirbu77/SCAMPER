@@ -27,6 +27,7 @@ import orbax.checkpoint as ocp
 
 from scamper.agent import checkpointing, gradients
 from scamper.agent.distill import losses as distill_losses
+from scamper.agent.mlp_prior import prior_rollout_eval
 from scamper.agent.distill.distill_networks import (
     DistillDecoder,
     DistillEncoder,
@@ -523,6 +524,30 @@ def train(
             encoder_hidden_layer_sizes=encoder_hidden_layer_sizes,
         )
 
+    # --- Initialize multi-mode prior rollout evaluator ---
+    multi_mode_evaluator = None
+    if prior_rollout_config is not None and prior_rollout_config.get("enabled", False):
+        logging.info("Initializing multi-mode prior rollout evaluator")
+        render_config = config_dict.get("render_config", {})
+        proprio_size = obs_sizes["proprioception"]
+
+        normalize = running_statistics.normalize
+        multi_mode_evaluator = prior_rollout_eval.MultiModePriorRolloutEvaluator(
+            env=environment,
+            intention_latent_size=latent_size,
+            action_size=action_size,
+            proprioceptive_obs_size=proprio_size,
+            decoder_hidden_layer_sizes=list(decoder_hidden_layer_sizes),
+            prior_hidden_layer_sizes=list(prior_hidden_layer_sizes),
+            preprocess_observations_fn=normalize,
+            max_steps=prior_rollout_config.get("max_steps", 200),
+            eval_interval=prior_rollout_config.get("eval_interval", 1),
+            render_fps=render_config.get("render_fps", 50),
+            render_camera_name=render_config.get("render_camera_name", "close_profile"),
+            model_path=str(ckpt_mgr.directory),
+        )
+        logging.info("Multi-mode prior rollout evaluator initialized")
+
     # --- Get starting iteration ---
     start_it = 0
     if ckpt_mgr is not None and ckpt_mgr.latest_step() is not None:
@@ -557,8 +582,21 @@ def train(
                 {f"eval/{k}_test": v for k, v in test_metrics.items() if "eval" in k}
             )
 
-        # Rollout logging callback
+        # Generate shared reset key for all rollouts
         policy_params_fn_key, reset_key = jax.random.split(policy_params_fn_key)
+
+        # Run multi-mode prior rollout evaluation
+        if multi_mode_evaluator is not None:
+            prior_metrics = multi_mode_evaluator.run_evaluation(
+                policy_params=policy_param,
+                eval_step=0,
+                reset_key=reset_key,
+            )
+            if prior_metrics is not None:
+                metrics.update(prior_metrics)
+                logging.info(f"Initial prior rollout metrics: {prior_metrics}")
+
+        # Rollout logging callback
         _, policy_params_fn_key = jax.random.split(policy_params_fn_key)
         policy_params_fn(
             current_step=0,
@@ -637,8 +675,21 @@ def train(
                     }
                 )
 
-            # Rollout logging callback
+            # Generate shared reset key for all rollouts
             policy_params_fn_key, reset_key = jax.random.split(policy_params_fn_key)
+
+            # Run multi-mode prior rollout evaluation
+            if multi_mode_evaluator is not None:
+                prior_metrics = multi_mode_evaluator.run_evaluation(
+                    policy_params=policy_param,
+                    eval_step=it,
+                    reset_key=reset_key,
+                )
+                if prior_metrics is not None:
+                    metrics.update(prior_metrics)
+                    logging.info(f"Prior rollout metrics: {prior_metrics}")
+
+            # Rollout logging callback
             _, policy_params_fn_key = jax.random.split(policy_params_fn_key)
             render_config = config_dict.get("render_config", {})
             render_interval = render_config.get("render_interval", 1)
