@@ -718,9 +718,9 @@ def train(
                 )
                 metrics.update(
                     {
-                        f"eval/{k}_test": v
+                        k.replace("eval/", "eval/test_set/", 1): v
                         for k, v in test_metrics.items()
-                        if "eval" in k
+                        if k.startswith("eval/")
                     }
                 )
 
