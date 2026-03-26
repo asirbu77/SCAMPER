@@ -94,6 +94,8 @@ def distill_rollout_logging_fn(
     # --- Student rollout ---
     state = jit_reset(reset_key)
     rollout = [state]
+    latent_means = []
+    latent_logvars = []
 
     _, act_rng = jax.random.split(policy_params_fn_key)
 
@@ -105,8 +107,31 @@ def distill_rollout_logging_fn(
         )
         ctrl = jnp.squeeze(ctrl, axis=0) if ctrl.shape[0] == 1 else ctrl
 
+        latent_means.append(extras["latent_mean"])
+        latent_logvars.append(extras["latent_logvar"])
+
         state = jit_step(state, ctrl)
         rollout.append(state)
+
+    # --- Log encoder latent statistics per dimension ---
+    latent_means = jnp.stack(latent_means)
+    latent_logvars = jnp.stack(latent_logvars)
+
+    means_mean = jnp.mean(latent_means, axis=0)
+    means_std = jnp.std(latent_means, axis=0)
+    logvars_mean = jnp.mean(latent_logvars, axis=0)
+    logvars_std = jnp.std(latent_logvars, axis=0)
+
+    for i in range(means_mean.shape[-1]):
+        wandb.log(
+            {
+                f"latents/latent_means_mean{i}": float(means_mean[i]),
+                f"latents/latent_means_std{i}": float(means_std[i]),
+                f"latents/latent_logvars_mean{i}": float(logvars_mean[i]),
+                f"latents/latent_logvars_std{i}": float(logvars_std[i]),
+            },
+            commit=False,
+        )
 
     # --- Render student video ---
     _render_student_video(env, cfg, model_path, current_step, rollout)
