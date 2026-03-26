@@ -533,6 +533,16 @@ def train(
         action_repeat=action_repeat,
         key=eval_key,
     )
+    teacher_test_evaluator = None
+    if eval_env_test_set is not None:
+        teacher_test_evaluator = acting.Evaluator(
+            test_eval_env,
+            functools.partial(teacher_make_policy, deterministic=True),
+            num_eval_envs=num_eval_envs,
+            episode_length=episode_length,
+            action_repeat=action_repeat,
+            key=eval_key,
+        )
 
     # --- Helper: create checkpoint params ---
     def get_policy_params(training_state):
@@ -582,7 +592,7 @@ def train(
     # --- Evaluate teacher once (constant baseline) ---
     teacher_baseline_metrics = {}
     if process_id == 0:
-        logging.info("Evaluating teacher baseline reward")
+        logging.info("Evaluating teacher baseline reward (train set)")
         teacher_eval_metrics = teacher_evaluator.run_evaluation(
             teacher_policy_params,
             training_metrics={},
@@ -593,9 +603,27 @@ def train(
             if k.startswith("eval/") and not k.endswith("_std")
         }
         logging.info(
-            f"Teacher baseline reward: "
+            f"Teacher baseline reward (train): "
             f"{teacher_eval_metrics.get('eval/episode_reward', 'N/A')}"
         )
+
+        if teacher_test_evaluator is not None:
+            logging.info("Evaluating teacher baseline reward (test set)")
+            teacher_test_metrics = teacher_test_evaluator.run_evaluation(
+                teacher_policy_params,
+                training_metrics={},
+            )
+            teacher_baseline_metrics.update(
+                {
+                    k.replace("eval/", "eval/teacher/test_set/", 1): v
+                    for k, v in teacher_test_metrics.items()
+                    if k.startswith("eval/") and not k.endswith("_std")
+                }
+            )
+            logging.info(
+                f"Teacher baseline reward (test): "
+                f"{teacher_test_metrics.get('eval/episode_reward', 'N/A')}"
+            )
 
     # --- Initial eval ---
     metrics = {}
