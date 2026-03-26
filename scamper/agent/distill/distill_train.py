@@ -691,6 +691,7 @@ def train(
                 args=ocp.args.Composite(
                     policy=ocp.args.StandardSave(policy_param),
                     train_state=ocp.args.StandardSave(ts),
+                    teacher=ocp.args.StandardSave(teacher_policy_params),
                     config=ocp.args.JsonSave(config_dict),
                 ),
             )
@@ -784,14 +785,20 @@ def train(
             progress_fn(current_step, metrics)
 
             if ckpt_mgr is not None:
-                checkpointing.save(
-                    ckpt_mgr,
-                    it,
-                    policy_param,
-                    ts,
-                    config_dict,
-                    checkpoint_callback,
+                ckpt_mgr.save(
+                    step=it,
+                    args=ocp.args.Composite(
+                        policy=ocp.args.StandardSave(policy_param),
+                        train_state=ocp.args.StandardSave(ts),
+                        teacher=ocp.args.StandardSave(teacher_policy_params),
+                        config=ocp.args.JsonSave(config_dict),
+                    ),
                 )
+                if checkpoint_callback is not None:
+                    try:
+                        checkpoint_callback(it)
+                    except Exception as e:
+                        logging.warning(f"Checkpoint callback failed: {e}")
 
     total_steps = current_step
     pmap.assert_is_replicated(training_state)
