@@ -243,11 +243,13 @@ class MultiModePriorRolloutEvaluator:
 
         self._key = random.PRNGKey(0)
 
-        # Define 4 evaluation modes
+        # Define evaluation modes
         self.evaluation_modes = [
             {"name": "deterministic", "deterministic": True, "fixed_logvar": -2.0},
             {"name": "logvar_0", "deterministic": False, "fixed_logvar": 0.0},
             {"name": "logvar_-2", "deterministic": False, "fixed_logvar": -2.0},
+            {"name": "logvar_-3", "deterministic": False, "fixed_logvar": -3.0},
+            {"name": "logvar_-4", "deterministic": False, "fixed_logvar": -4.0},
             {"name": "predicted_logvar", "deterministic": False, "fixed_logvar": None},
         ]
 
