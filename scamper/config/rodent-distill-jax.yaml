@@ -127,6 +127,11 @@ distill_config:
   ar1_weight: 0.1
   grad_clip_norm: 10.0
 
+  # Logvar clamping (matches PULSE defaults)
+  clamp_logvar: true
+  logvar_min: -5.0
+  logvar_max: 0.0
+
   # KL schedule
   use_kl_schedule: false
   kl_schedule_params:

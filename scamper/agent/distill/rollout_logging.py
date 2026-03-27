@@ -76,6 +76,7 @@ def distill_rollout_logging_fn(
     action_size = cfg.network_config.action_size
 
     # Create network modules
+    distill_cfg = cfg.distill_config
     encoder, decoder, prior, action_dist = make_distill_networks(
         obs_sizes=obs_sizes,
         action_size=action_size,
@@ -83,6 +84,9 @@ def distill_rollout_logging_fn(
         encoder_hidden_layer_sizes=tuple(cfg.network_config.encoder_layer_sizes),
         decoder_hidden_layer_sizes=tuple(cfg.network_config.decoder_layer_sizes),
         prior_hidden_layer_sizes=tuple(cfg.network_config.prior_layer_sizes),
+        clamp_logvar=distill_cfg.get("clamp_logvar", True),
+        logvar_min=distill_cfg.get("logvar_min", -5.0),
+        logvar_max=distill_cfg.get("logvar_max", 0.0),
     )
 
     # Create student inference function

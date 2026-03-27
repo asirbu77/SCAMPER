@@ -108,6 +108,9 @@ def train(
     encoder_hidden_layer_sizes: Tuple[int, ...] = (2048, 1024, 1024),
     decoder_hidden_layer_sizes: Tuple[int, ...] = (1024, 1024, 512),
     prior_hidden_layer_sizes: Tuple[int, ...] = (1536, 1024, 512),
+    clamp_logvar: bool = True,
+    logvar_min: float = -5.0,
+    logvar_max: float = 0.0,
     progress_fn: Callable[[int, Metrics], None] = lambda *args: None,
     eval_env: Optional[envs.Env] = None,
     eval_env_test_set: Optional[envs.Env] = None,
@@ -253,6 +256,9 @@ def train(
         encoder_hidden_layer_sizes=encoder_hidden_layer_sizes,
         decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
         prior_hidden_layer_sizes=prior_hidden_layer_sizes,
+        clamp_logvar=clamp_logvar,
+        logvar_min=logvar_min,
+        logvar_max=logvar_max,
     )
 
     init_params = init_distill_params(

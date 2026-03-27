@@ -38,6 +38,9 @@ class DistillEncoder(nn.Module):
     Attributes:
         layer_sizes: Hidden layer dimensions.
         latents: Latent dimension.
+        clamp_logvar: Whether to clamp logvar to [logvar_min, logvar_max].
+        logvar_min: Minimum logvar value (default -5, matching PULSE).
+        logvar_max: Maximum logvar value (default 0, matching PULSE).
     """
 
     layer_sizes: Sequence[int]
@@ -45,6 +48,9 @@ class DistillEncoder(nn.Module):
     activation: networks.ActivationFn = nn.silu
     kernel_init: networks.Initializer = jax.nn.initializers.lecun_uniform()
     bias: bool = True
+    clamp_logvar: bool = True
+    logvar_min: float = -5.0
+    logvar_max: float = 0.0
 
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -60,6 +66,8 @@ class DistillEncoder(nn.Module):
 
         mean = nn.Dense(self.latents, name="fc_mean")(x)
         logvar = nn.Dense(self.latents, name="fc_logvar")(x)
+        if self.clamp_logvar:
+            logvar = jnp.clip(logvar, self.logvar_min, self.logvar_max)
         return mean, logvar
 
 
@@ -103,6 +111,9 @@ class DistillPrior(nn.Module):
     Attributes:
         layer_sizes: Hidden layer dimensions.
         latents: Latent dimension (must match encoder).
+        clamp_logvar: Whether to clamp logvar to [logvar_min, logvar_max].
+        logvar_min: Minimum logvar value (default -5, matching PULSE).
+        logvar_max: Maximum logvar value (default 0, matching PULSE).
     """
 
     layer_sizes: Sequence[int]
@@ -110,6 +121,9 @@ class DistillPrior(nn.Module):
     activation: networks.ActivationFn = nn.silu
     kernel_init: networks.Initializer = jax.nn.initializers.lecun_uniform()
     bias: bool = True
+    clamp_logvar: bool = True
+    logvar_min: float = -5.0
+    logvar_max: float = 0.0
 
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -125,6 +139,8 @@ class DistillPrior(nn.Module):
 
         mean = nn.Dense(self.latents, name="fc2_mean")(x)
         logvar = nn.Dense(self.latents, name="fc2_logvar")(x)
+        if self.clamp_logvar:
+            logvar = jnp.clip(logvar, self.logvar_min, self.logvar_max)
         return mean, logvar
 
 
@@ -168,6 +184,9 @@ def make_distill_networks(
     encoder_hidden_layer_sizes: Sequence[int] = (2048, 1024, 1024),
     decoder_hidden_layer_sizes: Sequence[int] = (1024, 1024, 512),
     prior_hidden_layer_sizes: Sequence[int] = (1536, 1024, 512),
+    clamp_logvar: bool = True,
+    logvar_min: float = -5.0,
+    logvar_max: float = 0.0,
 ) -> tuple[
     DistillEncoder, DistillDecoder, DistillPrior, distribution.ParametricDistribution
 ]:
@@ -181,6 +200,9 @@ def make_distill_networks(
     encoder = DistillEncoder(
         layer_sizes=list(encoder_hidden_layer_sizes),
         latents=latent_size,
+        clamp_logvar=clamp_logvar,
+        logvar_min=logvar_min,
+        logvar_max=logvar_max,
     )
     decoder = DistillDecoder(
         layer_sizes=list(decoder_hidden_layer_sizes) + [action_param_size],
@@ -188,6 +210,9 @@ def make_distill_networks(
     prior = DistillPrior(
         layer_sizes=list(prior_hidden_layer_sizes),
         latents=latent_size,
+        clamp_logvar=clamp_logvar,
+        logvar_min=logvar_min,
+        logvar_max=logvar_max,
     )
     action_dist = distribution.NormalTanhDistribution(event_size=action_size)
 
