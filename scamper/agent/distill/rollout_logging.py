@@ -87,7 +87,7 @@ def distill_rollout_logging_fn(
 
     # Create student inference function
     make_logging_policy = make_logging_inference_fn(
-        encoder, decoder, action_dist, obs_sizes, latent_size
+        encoder, decoder, action_dist, obs_sizes, latent_size, prior=prior
     )
     jit_student_policy = jax.jit(make_logging_policy(deterministic=True))
 
@@ -96,6 +96,8 @@ def distill_rollout_logging_fn(
     rollout = [state]
     latent_means = []
     latent_logvars = []
+    prior_means = []
+    prior_logvars = []
 
     _, act_rng = jax.random.split(policy_params_fn_key)
 
@@ -109,6 +111,8 @@ def distill_rollout_logging_fn(
 
         latent_means.append(extras["latent_mean"])
         latent_logvars.append(extras["latent_logvar"])
+        prior_means.append(extras["prior_mean"])
+        prior_logvars.append(extras["prior_logvar"])
 
         state = jit_step(state, ctrl)
         rollout.append(state)
@@ -125,10 +129,30 @@ def distill_rollout_logging_fn(
     for i in range(means_mean.shape[-1]):
         wandb.log(
             {
-                f"latents/latent_means_mean{i}": float(means_mean[i]),
-                f"latents/latent_means_std{i}": float(means_std[i]),
-                f"latents/latent_logvars_mean{i}": float(logvars_mean[i]),
-                f"latents/latent_logvars_std{i}": float(logvars_std[i]),
+                f"latents/encoder_means_mean{i}": float(means_mean[i]),
+                f"latents/encoder_means_std{i}": float(means_std[i]),
+                f"latents/encoder_logvars_mean{i}": float(logvars_mean[i]),
+                f"latents/encoder_logvars_std{i}": float(logvars_std[i]),
+            },
+            commit=False,
+        )
+
+    # --- Log prior latent statistics per dimension ---
+    prior_means = jnp.stack(prior_means)
+    prior_logvars = jnp.stack(prior_logvars)
+
+    prior_means_mean = jnp.mean(prior_means, axis=0)
+    prior_means_std = jnp.std(prior_means, axis=0)
+    prior_logvars_mean = jnp.mean(prior_logvars, axis=0)
+    prior_logvars_std = jnp.std(prior_logvars, axis=0)
+
+    for i in range(prior_means_mean.shape[-1]):
+        wandb.log(
+            {
+                f"latents/prior_means_mean{i}": float(prior_means_mean[i]),
+                f"latents/prior_means_std{i}": float(prior_means_std[i]),
+                f"latents/prior_logvars_mean{i}": float(prior_logvars_mean[i]),
+                f"latents/prior_logvars_std{i}": float(prior_logvars_std[i]),
             },
             commit=False,
         )

@@ -299,6 +299,7 @@ def make_logging_inference_fn(
     action_dist: distribution.ParametricDistribution,
     obs_sizes: Mapping[str, int],
     latent_size: int,
+    prior: DistillPrior | None = None,
 ):
     """Create a logging policy factory where params are passed explicitly.
 
@@ -334,12 +335,21 @@ def make_logging_inference_fn(
                 raw_action = action_dist.sample_no_postprocessing(logits, key_sample)
                 action = action_dist.postprocess(raw_action)
 
-            return jnp.array(action), {
+            extras = {
                 "latent_mean": latent_mean,
                 "latent_logvar": latent_logvar,
                 "intention": z,
                 "logits": logits,
             }
+
+            if prior is not None:
+                prior_mean, prior_logvar = prior.apply(
+                    network_params.prior, proprio_obs
+                )
+                extras["prior_mean"] = prior_mean
+                extras["prior_logvar"] = prior_logvar
+
+            return jnp.array(action), extras
 
         return logging_policy
 
