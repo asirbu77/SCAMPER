@@ -24,8 +24,8 @@ import numpy as np
 from brax.training.acme import running_statistics, specs
 from brax.training.agents.ppo import networks as ppo_networks
 
-from vnl_playground.tasks.rodent import consts as rodent_consts
-from vnl_playground.tasks.rodent import bowl_escape
+from scamper.environment.rodent import consts as rodent_consts
+from scamper.environment.rodent import bowl_escape
 
 from scamper.agent.task_transfer.bowl_escape.checkpoint_utils import (
     load_prior_checkpoint,

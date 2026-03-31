@@ -20,8 +20,8 @@ import orbax.checkpoint as ocp
 import wandb
 from mujoco_playground import wrapper as playground_wrappers
 from omegaconf import DictConfig, OmegaConf
-from vnl_playground.tasks.reference_clips import ReferenceClips
-from vnl_playground.tasks.rodent import imitation
+from scamper.environment.reference_clips import ReferenceClips
+from scamper.environment.rodent import imitation
 
 from scamper.agent import checkpointing, wandb_logging
 from scamper.agent.distill import distill_train

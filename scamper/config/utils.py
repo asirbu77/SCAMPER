@@ -51,9 +51,7 @@ def _get_package_commit(package_name: str) -> str:
     return "unknown"
 
 
-from vnl_playground.tasks.fruitfly import consts as fruitfly_consts
-from vnl_playground.tasks.mouse import consts as mouse_consts
-from vnl_playground.tasks.rodent import consts as rodent_consts
+from scamper.environment.rodent import consts as rodent_consts
 
 # Project root directory (scamper/)
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -110,23 +108,6 @@ def prepare_config(
         reference_data_path = _resolve_data_path(
             "data/rodent/rodent_reference_clips.h5"
         )
-    elif walker_name == "fruitfly":
-        logging.info("Using fruitfly walker")
-        walker_xml_path = str(fruitfly_consts.FRUITFLY_XML_PATH)
-        arena_xml_path = str(fruitfly_consts.ARENA_XML_PATH)
-        reference_data_path = _resolve_data_path("data/fruitfly/fly_reference_clip.h5")
-    elif walker_name == "celegans":
-        logging.info("Using celegans walker")
-        raise NotImplementedError("Celegans walker not implemented yet.")
-    elif walker_name == "mouse":
-        logging.info("Using mouse walker")
-        walker_xml_path = str(mouse_consts.MOUSE_XML_PATH)
-        raise NotImplementedError(
-            "Mouse arena and reference data paths not implemented yet."
-        )
-    elif walker_name == "stickbug":
-        logging.info("Using stickbug walker")
-        raise NotImplementedError("Stickbug walker not implemented yet.")
     else:
         raise ValueError(f"Unknown walker name: {walker_name}")
 
@@ -151,8 +132,8 @@ def prepare_config(
     )
     OmegaConf.update(
         cfg.env_config,
-        "vnl_playground_commit",
-        _get_package_commit("vnl-playground"),
+        "scamper_commit",
+        _get_package_commit("scamper"),
         merge=False,
     )
     OmegaConf.set_struct(cfg.env_config, True)

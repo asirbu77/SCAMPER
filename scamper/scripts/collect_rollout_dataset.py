@@ -38,9 +38,9 @@ from ml_collections import ConfigDict
 from mujoco import mjx
 from omegaconf import OmegaConf
 from tqdm import tqdm
-from vnl_playground.tasks.rodent import imitation
-from vnl_playground.tasks import wrappers as vnl_wrappers
-from vnl_playground.tasks.reference_clips import ReferenceClips
+from scamper.environment.rodent import imitation
+from scamper.environment import wrappers as vnl_wrappers
+from scamper.environment.reference_clips import ReferenceClips
 
 from scamper.agent.mlp_prior import prior_networks
 from scamper.agent.mlp_prior.prior_rollout_eval import (
@@ -201,14 +201,23 @@ def fix_config_paths(
         if not path_str:
             return path_str
 
-        # Paths containing vnl_playground/ resolve via the current installation
-        VNL_MARKER = "vnl_playground/"
-        if VNL_MARKER in path_str:
-            import vnl_playground
+        # Paths containing scamper/environment/ resolve via the current installation
+        ENV_MARKER = "scamper/environment/"
+        if ENV_MARKER in path_str:
+            import scamper.environment
 
-            vnl_root = str(Path(vnl_playground.__file__).parent)
+            env_root = str(Path(scamper.environment.__file__).parent)
+            rel_path = path_str[path_str.index(ENV_MARKER) + len(ENV_MARKER) :]
+            return os.path.join(env_root, rel_path)
+
+        # Legacy: old checkpoints with vnl_playground/tasks/ paths
+        VNL_MARKER = "vnl_playground/tasks/"
+        if VNL_MARKER in path_str:
+            import scamper.environment
+
+            env_root = str(Path(scamper.environment.__file__).parent)
             rel_path = path_str[path_str.index(VNL_MARKER) + len(VNL_MARKER) :]
-            return os.path.join(vnl_root, rel_path)
+            return os.path.join(env_root, rel_path)
 
         # Any /tmp/<project>/... path: strip the prefix and resolve relative
         # to the current project root (handles /tmp/scamper, /tmp/track-mjx, etc.)

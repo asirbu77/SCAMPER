@@ -49,8 +49,8 @@ from brax.training.acme import running_statistics, specs
 from mujoco_playground import wrapper
 from omegaconf import DictConfig, OmegaConf
 
-from vnl_playground.tasks.rodent import consts as rodent_consts
-from vnl_playground.tasks.rodent import follow_target
+from scamper.environment.rodent import consts as rodent_consts
+from scamper.environment.rodent import follow_target
 
 from scamper.agent.task_transfer.follow_target.checkpoint_utils import (
     load_prior_checkpoint,

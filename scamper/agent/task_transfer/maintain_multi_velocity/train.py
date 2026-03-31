@@ -47,8 +47,8 @@ from brax.training.acme import running_statistics, specs
 from mujoco_playground import wrapper
 from omegaconf import DictConfig, OmegaConf
 
-from vnl_playground.tasks.rodent import consts as rodent_consts
-from vnl_playground.tasks.rodent import maintain_multi_velocity
+from scamper.environment.rodent import consts as rodent_consts
+from scamper.environment.rodent import maintain_multi_velocity
 
 from scamper.agent.task_transfer.maintain_multi_velocity.checkpoint_utils import (
     load_prior_checkpoint,
