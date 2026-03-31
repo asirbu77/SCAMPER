@@ -198,6 +198,7 @@ def main(cfg: DictConfig) -> None:
     env_cfg.reward_terms = {
         "distance_to_target": {"weight": cfg.env.reward_weights.distance_to_target},
         "walk_rear_success": {"weight": cfg.env.reward_weights.walk_rear_success},
+        "control_diff_cost": {"weight": cfg.env.reward_weights.control_diff_cost},
     }
     logging.info(
         f"Environment config: ctrl_dt={env_cfg.ctrl_dt}, "
@@ -207,7 +208,8 @@ def main(cfg: DictConfig) -> None:
     )
     logging.info(
         f"Reward weights: distance_to_target={cfg.env.reward_weights.distance_to_target}, "
-        f"walk_rear_success={cfg.env.reward_weights.walk_rear_success}"
+        f"walk_rear_success={cfg.env.reward_weights.walk_rear_success}, "
+        f"control_diff_cost={cfg.env.reward_weights.control_diff_cost}"
     )
 
     # Set actuator type: scratch mode can optionally use PD actuators;

@@ -198,16 +198,30 @@ def main(cfg: DictConfig) -> None:
         "forward_velocity": {"weight": cfg.env.reward_weights.forward_velocity},
         "lateral_velocity": {"weight": cfg.env.reward_weights.lateral_velocity},
         "angular_velocity_z": {"weight": cfg.env.reward_weights.angular_velocity_z},
+        "control_diff_cost": {"weight": cfg.env.reward_weights.control_diff_cost},
+        "control_cost": {"weight": cfg.env.reward_weights.control_cost},
+        "energy_cost": {
+            "weight": cfg.env.reward_weights.energy_cost,
+            "max_value": cfg.env.energy_cost_max_value,
+        },
     }
     logging.info(
         f"Environment config: ctrl_dt={env_cfg.ctrl_dt}, "
         f"min_velocity={env_cfg.min_velocity}, max_velocity={env_cfg.max_velocity}"
     )
+    env_cfg.termination_criteria = {
+        "fallen": {"min_torso_z": 0.03, "max_torso_angle": 60},
+        "out_of_bounds_y": {"max_y": cfg.env.max_y},
+        "nan_termination": {},
+    }
     logging.info(
         f"Reward weights: forward_velocity={cfg.env.reward_weights.forward_velocity}, "
         f"lateral_velocity={cfg.env.reward_weights.lateral_velocity}, "
-        f"angular_velocity_z={cfg.env.reward_weights.angular_velocity_z}"
+        f"angular_velocity_z={cfg.env.reward_weights.angular_velocity_z}, "
+        f"control_cost={cfg.env.reward_weights.control_cost}, "
+        f"energy_cost={cfg.env.reward_weights.energy_cost}"
     )
+    logging.info(f"Y-bound termination: max_y={cfg.env.max_y}")
 
     # Set actuator type: scratch mode can optionally use PD actuators;
     # decoder_only and prior_decoder always use torque (frozen decoder
