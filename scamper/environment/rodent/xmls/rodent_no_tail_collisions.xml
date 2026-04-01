@@ -167,11 +167,11 @@
       <camera name="close_side_front_R" mode="trackcom" pos="0.05 -0.15 0.01" xyaxes="1 0 0 0 1 2"/>
       <camera name="close_side_hind_L" mode="trackcom" pos="-0.05 0.15 0.01" xyaxes="-1 0 0 0 -1 2"/>
       <camera name="close_side_front_L" mode="trackcom" pos="0.05 0.15 0.01" xyaxes="-1 0 0 0 -1 2"/>
-      <!-- <camera name="front" mode="trackcom" pos="1 0 0.3" xyaxes="0 1 0 0 0 1"/> -->
+      <camera name="front" mode="trackcom" pos="1 0 0.3" xyaxes="0 1 0 0 0 1"/>
       <!-- <camera name="above" mode="trackcom" pos="0 0 1.5" xyaxes="1 0 0 0 1 0"/> -->
       <!-- <camera name="below" mode="trackcom" pos="0 0 -0.5" xyaxes="1 0 0 0 -1 0"/> -->
       <!-- <camera name="diagonal" mode="trackcom" pos="0.7 -0.7 0.7" xyaxes="1 1 0 -1 1 2"/> -->
-      <!-- <camera name="close_front" mode="trackcom" pos="0.3 0 0.2" xyaxes="0 1 0 0 0 1"/> -->
+      <camera name="close_front" mode="trackcom" pos="0.3 0 0.2" xyaxes="0 1 0 0 0 1"/>
       <!-- <camera name="wide_view" mode="trackcom" fovy="120.0" pos="0 -2 1" xyaxes="1 0 0 0 1 2"/> -->
       <!-- <camera name="head_follow" mode="track" target="skull" pos="0.2 0 0.1" xyaxes="0 1 0 0 0 1"/> -->
       <!-- <camera name="tail_view" mode="trackcom" pos="-0.8 0 0.3" xyaxes="0 1 0 0 0 1"/> -->
