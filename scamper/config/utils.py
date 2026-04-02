@@ -120,10 +120,12 @@ def prepare_config(
         raise NotImplementedError("Celegans walker not implemented yet.")
     elif walker_name == "mouse":
         logging.info("Using mouse walker")
-        walker_xml_path = str(mouse_consts.MOUSE_XML_PATH)
-        raise NotImplementedError(
-            "Mouse arena and reference data paths not implemented yet."
-        )
+        if xml_variant == "janelia":
+            walker_xml_path = str(mouse_consts.JANELIA_MOUSE_XML_PATH)
+        else:
+            walker_xml_path = str(mouse_consts.MOUSE_XML_PATH)
+        arena_xml_path = str(mouse_consts.MOUSE_ARENA_XML_PATH)
+        reference_data_path = str(mouse_consts.MOUSE_REFERENCE_DATA_PATH)
     elif walker_name == "stickbug":
         logging.info("Using stickbug walker")
         raise NotImplementedError("Stickbug walker not implemented yet.")

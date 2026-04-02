@@ -38,8 +38,12 @@ def _flatten_nested_obs(nested: Any) -> jnp.ndarray:
         if nested.ndim <= 2:
             # 1D (unbatched) or 2D (batched, already flat) - return as-is
             return nested
+        elif nested.ndim == 3:
+            # 3D array: could be (batch, time, obs) from generate_unroll.
+            # Merge all leading dims into one batch dim, keep last as obs.
+            return nested.reshape(-1, nested.shape[-1])
         else:
-            # 3D+ array: preserve batch dim (first), flatten the rest
+            # 4D+ array: preserve batch dim (first), flatten the rest
             # (batch, d1, d2, ...) -> (batch, d1*d2*...)
             return nested.reshape(nested.shape[0], -1)
 
@@ -75,17 +79,32 @@ def flatten_obs_dict(obs: Mapping[str, Any]) -> dict[str, jnp.ndarray]:
     to flat arrays at each key, suitable for normalization and network input.
     Preserves the batch dimension if present.
 
+    Handles vnl_playground observation formats:
+    - {"imitation_target": ..., "proprioception": ...} (direct)
+    - {"state": {"task_obs": ..., "proprioception": ...}} (wrapped)
+    - {"state": {"imitation_target": ..., "proprioception": ...}} (wrapped)
+
     Args:
         obs: Observation dict where values may be nested dicts or flat arrays.
             Can be unbatched (each value is 1D) or batched (each value has
             leading batch dimension).
 
     Returns:
-        Dict with the same keys but flattened array values. Shape is
-        (obs_size,) for unbatched input or (batch_size, obs_size) for batched.
+        Dict with keys "imitation_target" and "proprioception", each with
+        flattened array values.
     """
+    # Unwrap the "state" wrapper if present
+    if "state" in obs and "imitation_target" not in obs and "task_obs" not in obs:
+        obs = obs["state"]
+
+    # Handle task_obs -> imitation_target aliasing
+    if "task_obs" in obs:
+        imitation_key = "task_obs"
+    else:
+        imitation_key = "imitation_target"
+
     return {
-        "imitation_target": _flatten_nested_obs(obs["imitation_target"]),
+        "imitation_target": _flatten_nested_obs(obs[imitation_key]),
         "proprioception": _flatten_nested_obs(obs["proprioception"]),
     }
 

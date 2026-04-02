@@ -31,6 +31,17 @@ env_config:
   ctrl_dt: 0.0025
   mocap_hz: 200
 
+  # Physics overrides (null = use XML defaults)
+  joint_damping: 1e-6
+  joint_armature: 4e-10
+  joint_stiffness: null
+  force_scale: null
+
+  # PD gains
+  Kp: 35.0
+  Kd: 0.5
+  episode_length: 100
+
   # Reference Clip Settings
   clip_length: 50
   clip_set: "all"
@@ -38,6 +49,7 @@ env_config:
   start_frame_range: [0, 1]
   qvel_init: "zeros"
   keep_clips_idx: null
+  recompute_kinematics: false
 
   # Walker-specific settings (Janelia XML body names)
   tracked_bodies: ["scapula", "humerus", "ulna", "wrist"]
@@ -153,6 +165,6 @@ logging_config:
 # =============================================================================
 walker_config:
   walker_name: "mouse"
-  xml_variant: null
+  xml_variant: "janelia"
   torque_actuators: false
   rescale_factor: 1.0
