@@ -130,6 +130,7 @@ def prior_training_rollout_logging_fn(
     encoder_logvars = []
     prior_means = []
     prior_logvars = []
+    episode_rewards = []
 
     for i in range(episode_length):
         _, act_rng = jax.random.split(act_rng)
@@ -156,6 +157,7 @@ def prior_training_rollout_logging_fn(
 
         state = jit_step(state, ctrl)
         rollout.append(state)
+        episode_rewards.append(float(state.reward))
 
     # Stack latents
     encoder_means = jnp.stack(encoder_means)
@@ -185,6 +187,16 @@ def prior_training_rollout_logging_fn(
         )
         kl_per_timestep.append(float(kl))
 
+    # Log episode reward metrics
+    episode_return = sum(episode_rewards)
+    wandb.log(
+        {
+            "eval/episode_return": episode_return,
+            "eval/episode_reward_mean": episode_return / max(len(episode_rewards), 1),
+        },
+        commit=False,
+    )
+
     # Log per-dimension latent statistics
     for i in range(encoder_means_mean.shape[-1]):
         wandb.log(
@@ -206,7 +218,7 @@ def prior_training_rollout_logging_fn(
     # Optionally render video (encoder+decoder rollout)
     if render_video:
         render_fps = cfg.render_config.render_fps
-        camera_name = f"{cfg.render_config.render_camera_name}-ghost"
+        camera_name = cfg.render_config.render_camera_name
 
         video_path = f"{model_path}/{current_step}_encoder_decoder.mp4"
         try:

@@ -178,7 +178,11 @@ def check_termination_nan(data: Any) -> jax.Array:
 def compute_world_zaxis_termination(env, datas: Any) -> jax.Array:
     """
     Batch compute world z-axis termination for all timesteps.
+    Returns all-False if the env doesn't support _get_world_zaxis (e.g., fixed-base arms).
     """
+    if not hasattr(env, '_get_world_zaxis'):
+        # Fixed-base envs (e.g., mouse arm) can't go upside down
+        return jnp.zeros(jax.tree_util.tree_leaves(datas.qpos)[0].shape[0], dtype=bool)
     world_zaxes = jax.vmap(env._get_world_zaxis)(datas)  # (max_steps, 3)
     return world_zaxes[:, 2] < 0  # (max_steps,)
 
@@ -238,18 +242,26 @@ class MultiModePriorRolloutEvaluator:
         self.max_steps = max_steps
         self.eval_interval = eval_interval
         self.render_fps = render_fps
-        self.render_camera_name = f"{render_camera_name}-rodent"
+        self.render_camera_name = render_camera_name
+        # Try to find the camera with walker suffix in the env's model
+        if hasattr(env, 'mj_model'):
+            model_cameras = [env.mj_model.camera(i).name for i in range(env.mj_model.ncam)]
+            # If the exact camera name exists, use it; otherwise try with common suffixes
+            if render_camera_name not in model_cameras:
+                for suffix in ["-rodent", "-mouse", "-fruitfly"]:
+                    candidate = f"{render_camera_name}{suffix}"
+                    if candidate in model_cameras:
+                        self.render_camera_name = candidate
+                        break
         self.model_path = model_path
 
         self._key = random.PRNGKey(0)
 
-        # Define evaluation modes
+        # Define 4 evaluation modes
         self.evaluation_modes = [
             {"name": "deterministic", "deterministic": True, "fixed_logvar": -2.0},
             {"name": "logvar_0", "deterministic": False, "fixed_logvar": 0.0},
             {"name": "logvar_-2", "deterministic": False, "fixed_logvar": -2.0},
-            {"name": "logvar_-3", "deterministic": False, "fixed_logvar": -3.0},
-            {"name": "logvar_-4", "deterministic": False, "fixed_logvar": -4.0},
             {"name": "predicted_logvar", "deterministic": False, "fixed_logvar": None},
         ]
 
@@ -398,6 +410,9 @@ class MultiModePriorRolloutEvaluator:
 
         self._key, rollout_key = random.split(self._key)
 
+        import wandb
+
+        metrics = {}
         for mode in self.evaluation_modes:
             mode_name = mode["name"]
 
@@ -411,6 +426,14 @@ class MultiModePriorRolloutEvaluator:
             step_count, _, states = single_rollout_fn(initial_state, mode_key)
             step_count = int(step_count)
 
+            # Log episode reward metrics for this mode
+            rewards = states.reward[:step_count]
+            episode_return = float(jnp.sum(rewards))
+            episode_reward_mean = float(jnp.mean(rewards))
+            metrics[f"prior_eval/{mode_name}_return"] = episode_return
+            metrics[f"prior_eval/{mode_name}_reward_mean"] = episode_reward_mean
+            metrics[f"prior_eval/{mode_name}_steps"] = step_count
+
             # Render the full rollout for this mode (even if terminated early)
             try:
                 self._render_rollout(states, self.max_steps, eval_step, mode_name)
@@ -419,4 +442,5 @@ class MultiModePriorRolloutEvaluator:
 
                 logging.warning(f"Failed to render {mode_name} rollout: {e}")
 
-        return {}
+        wandb.log(metrics, commit=False)
+        return metrics
