@@ -95,9 +95,14 @@ env_config:
 # Rendering Configuration
 # =============================================================================
 render_config:
-  render_camera_name: my_camera
+  render_camera_name: janelia_cam
   render_fps: 100
   render_interval: 1
+  camera_override:
+    name: janelia_cam
+    pos: [0.10, 0.01, 0.07]
+    xyaxes: [0, 1, 0, -0.3, 0, 1]
+    fovy: 45
 
 # =============================================================================
 # Multi-Mode Prior Rollout Evaluation

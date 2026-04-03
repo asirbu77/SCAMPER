@@ -265,6 +265,19 @@ def main(cfg: DictConfig):
     else:
         rollout_env = imitation.Imitation(config=rollout_cfg, clips=train_clips)
 
+    # Inject custom render camera into env specs if configured
+    camera_override = cfg.render_config.get("camera_override", None) if hasattr(cfg, "render_config") else None
+    if camera_override is not None:
+        for e in [env, test_env, rollout_env]:
+            if hasattr(e, '_spec'):
+                e._spec.worldbody.add_camera(
+                    name=camera_override.name,
+                    pos=list(camera_override.pos),
+                    xyaxes=list(camera_override.xyaxes),
+                    fovy=camera_override.fovy,
+                )
+        logging.info(f"Added render camera '{camera_override.name}' to env specs")
+
     # Define the jit reset/step functions for logging
     jit_reset = jax.jit(rollout_env.reset)
     jit_step = jax.jit(rollout_env.step)
