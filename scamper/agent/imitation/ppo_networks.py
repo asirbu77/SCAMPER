@@ -270,6 +270,7 @@ def make_intention_ppo_networks(
     encoder_hidden_layer_sizes: Sequence[int] = (1024,) * 2,
     decoder_hidden_layer_sizes: Sequence[int] = (1024,) * 2,
     value_hidden_layer_sizes: Sequence[int] = (1024,) * 2,
+    proprioception_noise_std: float = 0.0,
 ) -> PPOImitationNetworks:
     """Create intention-based PPO networks for imitation learning.
 
@@ -299,6 +300,7 @@ def make_intention_ppo_networks(
         obs_sizes=obs_sizes,
         encoder_hidden_layer_sizes=encoder_hidden_layer_sizes,
         decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
+        proprioception_noise_std=proprioception_noise_std,
     )
 
     value_network = make_dict_value_network(

@@ -293,6 +293,7 @@ def make_ppo_network_from_cfg(cfg: DictConfig) -> Any:
         encoder_hidden_layer_sizes=tuple(network_config.encoder_layer_sizes),
         decoder_hidden_layer_sizes=tuple(network_config.decoder_layer_sizes),
         value_hidden_layer_sizes=tuple(network_config.critic_layer_sizes),
+        proprioception_noise_std=network_config.get("proprioception_noise_std", 0.0),
     )
 
 
