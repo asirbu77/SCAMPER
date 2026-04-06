@@ -786,3 +786,13 @@ def load_from_run_state_distill(
     Uses DistillNetwork step prefix.
     """
     return _load_from_run_state_with_prefix(cfg, step_prefix="DistillNetwork")
+
+
+def load_from_run_state_distill_prior(
+    cfg: DictConfig,
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Load or create run state for distill prior (RGM) training.
+
+    Uses DistillPriorNetwork step prefix.
+    """
+    return _load_from_run_state_with_prefix(cfg, step_prefix="DistillPriorNetwork")
