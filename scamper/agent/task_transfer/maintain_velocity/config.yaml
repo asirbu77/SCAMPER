@@ -38,9 +38,8 @@ distill:
   noise_logvar: -2.0
 
 distill_prior:
-  deterministic_prior: true
-  noise_logvar: -2.0
-  kl_reward_weight: 0.1  # RGM KL penalty weight (0.0 = disabled, equivalent to prior_decoder)
+  gate_scale: 5.0   # Multiplier on gate logit before sigmoid
+  gate_bias: 3.0    # Negative bias so gate starts near 0 (sigmoid(-3) ≈ 0.05)
 
 scratch:
   # Actuator type: true = torque (matches imitation training), false = PD actuators

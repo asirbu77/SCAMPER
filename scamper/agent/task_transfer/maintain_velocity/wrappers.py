@@ -308,15 +308,16 @@ class PriorDecoderHighLevelWrapper(wrapper.Wrapper):
 
 
 class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
-    """Mode 3: Policy outputs residual -> add to prior mean -> decoder -> ctrl.
+    """Mode 3: Learned gate blends policy+prior with RGM -> decoder -> ctrl.
 
-    Uses the prior as the stable latent base (like prior_decoder mode) and adds
-    a KL reward penalty that biases the policy's residual toward the RGM's
-    suggestion. This encourages naturalistic movement (from the RGM) while
-    keeping the prior's well-structured latent space for gradient learning.
+    The policy outputs 2 * latent_size: a residual vector and a gate vector.
+    A per-dimension gate controls the blend between (residual + prior_mean)
+    and (rgm_mean + rgm_noise). The gate is initialised near zero so the RGM
+    dominates at the start (naturalistic behaviour). As the policy learns
+    useful task behaviour, the gate opens and transitions to the prior base.
 
-    The KL penalty is: -kl_reward_weight * 0.5 * mean((action - target)^2 / var + logvar)
-    where target = rgm_mean - prior_mean and var = exp(rgm_logvar).
+    At init:  gate ~ 0.05 -> latent ~ rgm_z  (naturalistic movement)
+    Trained:  gate ~ 1.0  -> latent ~ action + prior_mean  (task transfer)
     """
 
     def __init__(
@@ -327,11 +328,10 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         decoder_inference_fn: Callable,
         latent_size: int,
         proprio_size: int,
-        deterministic_prior: bool = True,
-        noise_logvar: float = -2.0,
-        kl_reward_weight: float = 0.1,
+        gate_scale: float = 5.0,
+        gate_bias: float = 3.0,
     ):
-        """Initialize the prior+rgm+decoder wrapper.
+        """Initialize the gated prior+rgm+decoder wrapper.
 
         Args:
             env: Base environment with dict observations.
@@ -340,21 +340,18 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             decoder_inference_fn: Function (latent_proprio) -> (action, extras)
             latent_size: Dimension of the latent intention space.
             proprio_size: Size of proprioceptive observations.
-            deterministic_prior: If True, use prior mean only (no noise).
-            noise_logvar: Fixed log-variance for noise sampling (used when
-                deterministic_prior=False).
-            kl_reward_weight: Weight for the RGM KL reward penalty. Larger
-                values bias the policy more strongly toward RGM-like behavior.
-                Set to 0.0 to disable (equivalent to prior_decoder mode).
+            gate_scale: Multiplier on gate logit before sigmoid. Larger values
+                make the gate more binary (on/off).
+            gate_bias: Negative bias so the gate starts near 0 at init.
+                sigmoid(-gate_bias) is the initial gate value (~0.05 for 3.0).
         """
         self._prior_fn = prior_inference_fn
         self._rgm_fn = rgm_inference_fn
         self._decoder_fn = decoder_inference_fn
         self._latent_size = latent_size
         self._proprio_size = proprio_size
-        self._deterministic = deterministic_prior
-        self._noise_logvar = noise_logvar
-        self._kl_reward_weight = kl_reward_weight
+        self._gate_scale = gate_scale
+        self._gate_bias = gate_bias
         super().__init__(env)
 
     def reset(
@@ -389,7 +386,10 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         state.info["decoder_extras"] = decoder_extras
 
         state.info["final_latent"] = jp.zeros_like(prior_mean)
-        state.info["kl_reward"] = jp.float32(0.0)
+        state.info["gate_mean"] = jp.float32(0.0)
+        state.info["gate_min"] = jp.float32(0.0)
+        state.info["gate_max"] = jp.float32(0.0)
+        state.info["gate_open_frac"] = jp.float32(0.0)
         state.info["rng"] = rng
 
         state = state.replace(obs=_flatten_obs_for_policy(state.obs))
@@ -397,30 +397,42 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         return state
 
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
-        """Take a step using residual + prior mean as latent, with RGM KL penalty.
+        """Take a step using gated blend of policy+prior and RGM.
+
+        The action has size 2 * latent_size: first half is the residual,
+        second half is the gate logit.
 
         Args:
             state: Current environment state.
-            action: Residual vector from the policy.
+            action: Concatenated [residual, gate_logit] from the policy.
 
         Returns:
             Next environment state after applying decoded control.
         """
         proprio = _get_proprio(state.obs, self._proprio_size)
 
+        # Split policy output into residual and gate
+        residual = action[..., : self._latent_size]
+        gate_logit = action[..., self._latent_size :]
+
+        # Gate: biased toward 0 at init so RGM dominates
+        gate = jax.nn.sigmoid(gate_logit * self._gate_scale - self._gate_bias)
+
+        # Frozen network outputs
         prior_mean, prior_logvar = self._prior_fn(proprio)
         rgm_mean, rgm_logvar = self._rgm_fn(proprio)
 
-        # Latent = residual + prior mean (same stable base as prior_decoder)
-        if self._deterministic:
-            latent = action + prior_mean
-        else:
-            rng = state.info.get("rng", jax.random.PRNGKey(0))
-            rng, noise_rng = jax.random.split(rng)
-            std = jp.exp(0.5 * self._noise_logvar)
-            noise = jax.random.normal(noise_rng, shape=prior_mean.shape) * std
-            latent = action + prior_mean + noise
-            state.info["rng"] = rng
+        # RGM with its own calibrated noise
+        rng = state.info.get("rng", jax.random.PRNGKey(0))
+        rng, noise_rng = jax.random.split(rng)
+        rgm_std = jp.exp(0.5 * rgm_logvar)
+        rgm_noise = jax.random.normal(noise_rng, shape=rgm_mean.shape) * rgm_std
+        rgm_z = rgm_mean + rgm_noise
+
+        # Per-dimension blend: gate=0 -> RGM, gate=1 -> policy+prior
+        latent = gate * (residual + prior_mean) + (1.0 - gate) * rgm_z
+
+        state.info["rng"] = rng
 
         latent_proprio = jp.concatenate([latent, proprio], axis=-1)
 
@@ -433,19 +445,15 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         state.info["rgm_logvar"] = rgm_logvar
         state.info["final_latent"] = latent
 
-        next_state = super().step(state, ctrl)
-
-        # KL reward penalty: penalise the residual for deviating from the
-        # RGM's suggested residual (rgm_mean - prior_mean).
-        target_residual = rgm_mean - prior_mean
-        rgm_var = jp.exp(rgm_logvar)
-        penalty = 0.5 * jp.mean(
-            (action - target_residual) ** 2 / rgm_var + rgm_logvar,
-            axis=-1,
+        # Gate logging metrics
+        state.info["gate_mean"] = jp.mean(gate, axis=-1)
+        state.info["gate_min"] = jp.min(gate, axis=-1)
+        state.info["gate_max"] = jp.max(gate, axis=-1)
+        state.info["gate_open_frac"] = jp.mean(
+            (gate > 0.5).astype(jp.float32), axis=-1
         )
-        kl_reward = -self._kl_reward_weight * penalty
-        next_state = next_state.replace(reward=next_state.reward + kl_reward)
-        next_state.info["kl_reward"] = kl_reward
+
+        next_state = super().step(state, ctrl)
 
         next_state = next_state.replace(obs=_flatten_obs_for_policy(next_state.obs))
 
@@ -453,5 +461,5 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
 
     @property
     def action_size(self) -> int:
-        """Return the latent size as the action size for the policy."""
-        return self._latent_size
+        """Return 2x latent size (residual + gate) as the action size."""
+        return 2 * self._latent_size

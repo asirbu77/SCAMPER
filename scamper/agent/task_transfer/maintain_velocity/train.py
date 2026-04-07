@@ -275,9 +275,8 @@ def main(cfg: DictConfig) -> None:
                 decoder_fn,
                 latent_size,
                 proprio_size,
-                deterministic_prior=mode_cfg.deterministic_prior,
-                noise_logvar=mode_cfg.noise_logvar,
-                kl_reward_weight=mode_cfg.kl_reward_weight,
+                gate_scale=mode_cfg.gate_scale,
+                gate_bias=mode_cfg.gate_bias,
             )
         else:  # prior_decoder or distill
             prior_fn = make_prior_inference_fn(
