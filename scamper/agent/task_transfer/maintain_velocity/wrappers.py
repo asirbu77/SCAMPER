@@ -310,11 +310,10 @@ class PriorDecoderHighLevelWrapper(wrapper.Wrapper):
 class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
     """Mode 3: Learned gate blends policy+prior with RGM -> decoder -> ctrl.
 
-    The policy outputs 2 * latent_size: a residual vector and a gate vector.
-    A per-dimension gate controls the blend between (residual + prior_mean)
-    and (rgm_mean + rgm_noise). The gate is initialised near zero so the RGM
-    dominates at the start (naturalistic behaviour). As the policy learns
-    useful task behaviour, the gate opens and transitions to the prior base.
+    The policy outputs latent_size + 1: a residual vector and a single scalar
+    gate logit. The scalar gate controls the blend between
+    (residual + prior_mean) and rgm_z for all latent dimensions.
+    The gate is initialised near zero so the RGM dominates at the start.
 
     At init:  gate ~ 0.05 -> latent ~ rgm_z  (naturalistic movement)
     Trained:  gate ~ 1.0  -> latent ~ action + prior_mean  (task transfer)
@@ -393,14 +392,11 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         state.info["final_latent"] = jp.zeros_like(prior_mean)
         state.info["rng"] = rng
 
-        # Gate metrics in state.metrics so Brax's EpisodeWrapper logs them
+        # Gate metric in state.metrics so Brax's EpisodeWrapper logs it
         state = state.replace(
             metrics={
                 **state.metrics,
-                "gate_mean": jp.float32(0.0),
-                "gate_min": jp.float32(0.0),
-                "gate_max": jp.float32(0.0),
-                "gate_open_frac": jp.float32(0.0),
+                "gate": jp.float32(0.0),
             },
             obs=_flatten_obs_for_policy(state.obs),
         )
@@ -410,8 +406,8 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
         """Take a step using gated blend of policy+prior and RGM.
 
-        The action has size 2 * latent_size: first half is the residual,
-        second half is the gate logit.
+        The action has size latent_size + 1: the residual vector followed by
+        a single scalar gate logit that controls all dimensions.
 
         Args:
             state: Current environment state.
@@ -422,11 +418,11 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         """
         proprio = _get_proprio(state.obs, self._proprio_size)
 
-        # Split policy output into residual and gate
+        # Split policy output into residual and scalar gate
         residual = action[..., : self._latent_size]
-        gate_logit = action[..., self._latent_size :]
+        gate_logit = action[..., self._latent_size]
 
-        # Gate: biased toward 0 at init so RGM dominates
+        # Scalar gate: biased toward 0 at init so RGM dominates
         gate = jax.nn.sigmoid(gate_logit * self._gate_scale - self._gate_bias)
 
         # Frozen network outputs
@@ -444,7 +440,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         else:
             rgm_z = rgm_mean
 
-        # Per-dimension blend: gate=0 -> RGM, gate=1 -> policy+prior
+        # Scalar blend: gate=0 -> RGM, gate=1 -> policy+prior
         latent = gate * (residual + prior_mean) + (1.0 - gate) * rgm_z
 
         state.info["rng"] = rng
@@ -464,12 +460,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         state = state.replace(
             metrics={
                 **state.metrics,
-                "gate_mean": jp.mean(gate, axis=-1),
-                "gate_min": jp.min(gate, axis=-1),
-                "gate_max": jp.max(gate, axis=-1),
-                "gate_open_frac": jp.mean(
-                    (gate > 0.5).astype(jp.float32), axis=-1
-                ),
+                "gate": gate,
             }
         )
 
@@ -481,5 +472,5 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
 
     @property
     def action_size(self) -> int:
-        """Return 2x latent size (residual + gate) as the action size."""
-        return 2 * self._latent_size
+        """Return latent_size + 1 (residual + scalar gate) as the action size."""
+        return self._latent_size + 1
