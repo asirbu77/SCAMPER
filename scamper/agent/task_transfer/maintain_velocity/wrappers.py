@@ -391,13 +391,19 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         state.info["decoder_extras"] = decoder_extras
 
         state.info["final_latent"] = jp.zeros_like(prior_mean)
-        state.info["gate_mean"] = jp.float32(0.0)
-        state.info["gate_min"] = jp.float32(0.0)
-        state.info["gate_max"] = jp.float32(0.0)
-        state.info["gate_open_frac"] = jp.float32(0.0)
         state.info["rng"] = rng
 
-        state = state.replace(obs=_flatten_obs_for_policy(state.obs))
+        # Gate metrics in state.metrics so Brax's EpisodeWrapper logs them
+        state = state.replace(
+            metrics={
+                **state.metrics,
+                "gate_mean": jp.float32(0.0),
+                "gate_min": jp.float32(0.0),
+                "gate_max": jp.float32(0.0),
+                "gate_open_frac": jp.float32(0.0),
+            },
+            obs=_flatten_obs_for_policy(state.obs),
+        )
 
         return state
 
@@ -454,12 +460,17 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         state.info["rgm_logvar"] = rgm_logvar
         state.info["final_latent"] = latent
 
-        # Gate logging metrics
-        state.info["gate_mean"] = jp.mean(gate, axis=-1)
-        state.info["gate_min"] = jp.min(gate, axis=-1)
-        state.info["gate_max"] = jp.max(gate, axis=-1)
-        state.info["gate_open_frac"] = jp.mean(
-            (gate > 0.5).astype(jp.float32), axis=-1
+        # Gate metrics in state.metrics so EpisodeWrapper aggregates them
+        state = state.replace(
+            metrics={
+                **state.metrics,
+                "gate_mean": jp.mean(gate, axis=-1),
+                "gate_min": jp.min(gate, axis=-1),
+                "gate_max": jp.max(gate, axis=-1),
+                "gate_open_frac": jp.mean(
+                    (gate > 0.5).astype(jp.float32), axis=-1
+                ),
+            }
         )
 
         next_state = super().step(state, ctrl)
