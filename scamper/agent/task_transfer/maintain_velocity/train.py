@@ -578,7 +578,9 @@ def main(cfg: DictConfig) -> None:
     }
 
     num_evals = max(int(remaining_timesteps / cfg.train.eval_every), 1)
-    progress_fn = make_wandb_progress_with_offset(step_offset)
+    progress_fn = make_wandb_progress_with_offset(
+        step_offset, episode_length=cfg.train.episode_length
+    )
 
     train_fn = functools.partial(
         brax_ppo.train,

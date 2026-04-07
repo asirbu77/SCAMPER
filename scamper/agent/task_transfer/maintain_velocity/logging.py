@@ -189,6 +189,7 @@ def wandb_progress(num_steps: int, metrics: dict[str, Any]) -> None:
 
 def make_wandb_progress_with_offset(
     step_offset: int = 0,
+    episode_length: int | None = None,
 ) -> Callable[[int, dict[str, Any]], None]:
     """Create a wandb progress function with step offset for resume support.
 
@@ -196,8 +197,14 @@ def make_wandb_progress_with_offset(
     from 0. This wrapper adds the offset so W&B shows correct cumulative
     step counts.
 
+    Brax's EpisodeWrapper sums state.metrics across timesteps. If
+    ``episode_length`` is provided, any metric whose key starts with
+    ``gate_`` (or ``eval/episode_gate_``) is divided by the episode length
+    so the logged value reflects the per-step average (0-1 range).
+
     Args:
         step_offset: Number of timesteps completed in previous runs.
+        episode_length: Episode length for normalizing accumulated metrics.
 
     Returns:
         Progress function compatible with Brax's ``progress_fn`` callback.
@@ -209,6 +216,13 @@ def make_wandb_progress_with_offset(
             return
         adjusted_step = num_steps + step_offset
         metrics["num_steps"] = adjusted_step
+
+        # Normalize accumulated gate metrics to per-step averages
+        if episode_length is not None:
+            for key in list(metrics.keys()):
+                if "gate_" in key:
+                    metrics[key] = metrics[key] / episode_length
+
         wandb.log(metrics)
 
     return progress_fn
