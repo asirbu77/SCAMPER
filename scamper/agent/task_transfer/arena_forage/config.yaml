@@ -1,19 +1,21 @@
 # Arena Forage Task Transfer Training Config
 #
-# Three training modes:
+# Four training modes:
 #   decoder_only: Freeze decoder, train new encoder
-#   prior_decoder: Freeze prior + decoder, train residual encoder
+#   prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
+#   distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
 # Usage:
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=decoder_only
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_decoder
+#   python -m scamper.agent.task_transfer.arena_forage.train mode=distill
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 
 defaults:
   - _self_
 
-# Training mode: "decoder_only", "prior_decoder", or "scratch"
+# Training mode: "decoder_only", "prior_decoder", "distill", or "scratch"
 mode: "decoder_only"
 
 # Checkpoint to load (mlp_prior checkpoint)
@@ -30,6 +32,10 @@ prior_decoder:
   # Whether to use prior mean only (no noise)
   deterministic_prior: true
   # Fixed log-variance for noise sampling (used when deterministic_prior=false)
+  noise_logvar: -2.0
+
+distill:
+  deterministic_prior: true
   noise_logvar: -2.0
 
 scratch:
