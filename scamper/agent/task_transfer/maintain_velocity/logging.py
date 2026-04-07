@@ -199,7 +199,7 @@ def make_wandb_progress_with_offset(
 
     Brax's EpisodeWrapper sums state.metrics across timesteps. If
     ``episode_length`` is provided, any metric whose key starts with
-    ``gate_`` (or ``eval/episode_gate_``) is divided by the episode length
+    ``_gate`` (e.g. ``episode_gate``) is divided by the episode length
     so the logged value reflects the per-step average (0-1 range).
 
     Args:
@@ -220,7 +220,7 @@ def make_wandb_progress_with_offset(
         # Normalize accumulated gate metrics to per-step averages
         if episode_length is not None:
             for key in list(metrics.keys()):
-                if "gate_" in key:
+                if "_gate" in key:
                     metrics[key] = metrics[key] / episode_length
 
         wandb.log(metrics)
