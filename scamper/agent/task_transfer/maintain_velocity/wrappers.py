@@ -308,13 +308,14 @@ class PriorDecoderHighLevelWrapper(wrapper.Wrapper):
 
 
 class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
-    """Mode 3: Policy outputs residual -> add to prior mean + rgm mean -> decoder -> ctrl.
+    """Mode 3: Policy outputs residual -> add to rgm mean -> decoder -> ctrl.
 
     This wrapper combines a learned residual policy with frozen prior and RGM
-    networks. The final latent is: residual + prior_mean + rgm_mean + optional_noise
+    networks. The final latent is: residual + rgm_mean + optional_noise
 
-    This allows the policy to learn task-specific corrections while leveraging
-    both the pretrained prior and the RGM's knowledge of natural movements.
+    The RGM provides active rodent-like locomotion as a base, while the residual
+    policy learns task-specific corrections. Prior outputs are still computed
+    and stored in state info for logging/analysis.
     """
 
     def __init__(
@@ -389,7 +390,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         return state
 
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
-        """Take a step using residual + prior mean + rgm mean as latent.
+        """Take a step using residual + rgm mean as latent.
 
         Args:
             state: Current environment state.
@@ -404,13 +405,13 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         rgm_mean, rgm_logvar = self._rgm_fn(proprio)
 
         if self._deterministic:
-            latent = action + prior_mean + rgm_mean
+            latent = action + rgm_mean
         else:
             rng = state.info.get("rng", jax.random.PRNGKey(0))
             rng, noise_rng = jax.random.split(rng)
             std = jp.exp(0.5 * self._noise_logvar)
             noise = jax.random.normal(noise_rng, shape=prior_mean.shape) * std
-            latent = action + prior_mean + rgm_mean + noise
+            latent = action + rgm_mean + noise
             state.info["rng"] = rng
 
         latent_proprio = jp.concatenate([latent, proprio], axis=-1)
