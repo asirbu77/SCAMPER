@@ -40,6 +40,7 @@ distill:
 distill_prior:
   gate_scale: 5.0   # Multiplier on gate logit before sigmoid
   gate_bias: 3.0    # Negative bias so gate starts near 0 (sigmoid(-3) ≈ 0.05)
+  rgm_noise: false  # false = use rgm_mean only, true = sample with predicted logvar
 
 scratch:
   # Actuator type: true = torque (matches imitation training), false = PD actuators

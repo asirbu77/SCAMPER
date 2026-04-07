@@ -330,6 +330,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         proprio_size: int,
         gate_scale: float = 5.0,
         gate_bias: float = 3.0,
+        rgm_noise: bool = False,
     ):
         """Initialize the gated prior+rgm+decoder wrapper.
 
@@ -344,6 +345,9 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
                 make the gate more binary (on/off).
             gate_bias: Negative bias so the gate starts near 0 at init.
                 sigmoid(-gate_bias) is the initial gate value (~0.05 for 3.0).
+            rgm_noise: If True, sample RGM with its predicted logvar. If False,
+                use rgm_mean only (deterministic). False is recommended since
+                the policy+prior side already adds variation.
         """
         self._prior_fn = prior_inference_fn
         self._rgm_fn = rgm_inference_fn
@@ -352,6 +356,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         self._proprio_size = proprio_size
         self._gate_scale = gate_scale
         self._gate_bias = gate_bias
+        self._rgm_noise = rgm_noise
         super().__init__(env)
 
     def reset(
@@ -422,12 +427,16 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         prior_mean, prior_logvar = self._prior_fn(proprio)
         rgm_mean, rgm_logvar = self._rgm_fn(proprio)
 
-        # RGM with its own calibrated noise
+        # RGM latent: optionally sample with predicted logvar
         rng = state.info.get("rng", jax.random.PRNGKey(0))
         rng, noise_rng = jax.random.split(rng)
-        rgm_std = jp.exp(0.5 * rgm_logvar)
-        rgm_noise = jax.random.normal(noise_rng, shape=rgm_mean.shape) * rgm_std
-        rgm_z = rgm_mean + rgm_noise
+        if self._rgm_noise:
+            rgm_std = jp.exp(0.5 * rgm_logvar)
+            rgm_z = rgm_mean + jax.random.normal(
+                noise_rng, shape=rgm_mean.shape
+            ) * rgm_std
+        else:
+            rgm_z = rgm_mean
 
         # Per-dimension blend: gate=0 -> RGM, gate=1 -> policy+prior
         latent = gate * (residual + prior_mean) + (1.0 - gate) * rgm_z
