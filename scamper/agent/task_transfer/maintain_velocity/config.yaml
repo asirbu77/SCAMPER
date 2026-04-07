@@ -40,6 +40,7 @@ distill:
 distill_prior:
   deterministic_prior: true
   noise_logvar: -2.0
+  kl_reward_weight: 0.1  # RGM KL penalty weight (0.0 = disabled, equivalent to prior_decoder)
 
 scratch:
   # Actuator type: true = torque (matches imitation training), false = PD actuators
