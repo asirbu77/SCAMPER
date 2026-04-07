@@ -1,21 +1,23 @@
 # Maintain Velocity Task Transfer Training Config
 #
-# Four training modes:
+# Five training modes:
 #   decoder_only: Freeze decoder, train new encoder
 #   prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
 #   distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
+#   distill_prior: Freeze prior + rgm + decoder, train residual encoder (from distill_prior checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
 # Usage:
 #   python -m scamper.agent.task_transfer.maintain_velocity.train mode=decoder_only
 #   python -m scamper.agent.task_transfer.maintain_velocity.train mode=prior_decoder
 #   python -m scamper.agent.task_transfer.maintain_velocity.train mode=distill
+#   python -m scamper.agent.task_transfer.maintain_velocity.train mode=distill_prior
 #   python -m scamper.agent.task_transfer.maintain_velocity.train mode=scratch
 
 defaults:
   - _self_
 
-# Training mode: "decoder_only", "prior_decoder", "distill", or "scratch"
+# Training mode: "decoder_only", "prior_decoder", "distill", "distill_prior", or "scratch"
 mode: "decoder_only"
 
 # Checkpoint to load (mlp_prior checkpoint)
@@ -32,6 +34,10 @@ prior_decoder:
   noise_logvar: -2.0
 
 distill:
+  deterministic_prior: true
+  noise_logvar: -2.0
+
+distill_prior:
   deterministic_prior: true
   noise_logvar: -2.0
 

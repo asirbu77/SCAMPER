@@ -1,9 +1,10 @@
 """Maintain velocity task transfer training with Brax PPO.
 
-Four training modes:
+Five training modes:
 - decoder_only: Freeze decoder, train new encoder
 - prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
 - distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
+- distill_prior: Freeze prior + rgm + decoder, train residual encoder (from distill_prior checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
@@ -12,6 +13,7 @@ Usage:
     python -m scamper.agent.task_transfer.maintain_velocity.train mode=decoder_only
     python -m scamper.agent.task_transfer.maintain_velocity.train mode=prior_decoder
     python -m scamper.agent.task_transfer.maintain_velocity.train mode=distill
+    python -m scamper.agent.task_transfer.maintain_velocity.train mode=distill_prior
     python -m scamper.agent.task_transfer.maintain_velocity.train mode=scratch
 """
 
@@ -51,8 +53,10 @@ from scamper.environment.rodent import maintain_velocity
 
 from scamper.agent.task_transfer.maintain_velocity.checkpoint_utils import (
     load_prior_checkpoint,
+    load_distill_prior_checkpoint,
     make_decoder_inference_fn,
     make_prior_inference_fn,
+    make_rgm_inference_fn,
     # Checkpointing / run state
     discover_existing_run_state,
     save_run_state,
@@ -70,6 +74,7 @@ from scamper.agent.task_transfer.maintain_velocity.wrappers import (
     DecoderHighLevelWrapper,
     FlatObsWrapper,
     PriorDecoderHighLevelWrapper,
+    PriorRGMDecoderHighLevelWrapper,
 )
 from scamper.agent.task_transfer.maintain_velocity.scratch_networks import (
     make_scratch_ppo_networks,
@@ -149,22 +154,40 @@ def main(cfg: DictConfig) -> None:
     # ----------------------------------------------------------------
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
 
-    if cfg.mode == "distill":
+    if cfg.mode == "distill_prior":
+        logging.info(f"Loading distill_prior checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            rgm_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_distill_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
+    elif cfg.mode == "distill":
         step_prefix = "DistillNetwork"
         logging.info(f"Loading distill checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_prior_checkpoint(
+            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
+        )
     else:
         step_prefix = "PriorNetwork"
         logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
-
-    (
-        encoder_params,
-        prior_params,
-        decoder_params,
-        normalizer_params,
-        ckpt_cfg,
-    ) = load_prior_checkpoint(
-        prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
-    )
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_prior_checkpoint(
+            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
+        )
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]
@@ -177,6 +200,8 @@ def main(cfg: DictConfig) -> None:
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
+    if cfg.mode == "distill_prior":
+        frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
     decoder_fn = make_decoder_inference_fn(decoder_params, normalizer_params, ckpt_cfg)
@@ -237,6 +262,22 @@ def main(cfg: DictConfig) -> None:
             )
         elif cfg.mode == "scratch":
             return FlatObsWrapper(base_env)
+        elif cfg.mode == "distill_prior":
+            prior_fn = make_prior_inference_fn(
+                prior_params, normalizer_params, ckpt_cfg
+            )
+            rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
+            mode_cfg = cfg.distill_prior
+            return PriorRGMDecoderHighLevelWrapper(
+                base_env,
+                prior_fn,
+                rgm_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
+                deterministic_prior=mode_cfg.deterministic_prior,
+                noise_logvar=mode_cfg.noise_logvar,
+            )
         else:  # prior_decoder or distill
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
