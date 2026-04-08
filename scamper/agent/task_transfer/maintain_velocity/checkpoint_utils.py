@@ -423,6 +423,7 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
     """
     hashable = {
         "mode": cfg.mode,
+        "exp_name": cfg.logging.exp_name,
         "checkpoint": {
             "path": cfg.checkpoint.path,
             "step": cfg.checkpoint.step,
