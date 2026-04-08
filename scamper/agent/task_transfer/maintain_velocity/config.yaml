@@ -38,10 +38,8 @@ distill:
   noise_logvar: -2.0
 
 distill_prior:
-  gate_scale: 5.0   # Multiplier on gate logit before sigmoid
-  gate_bias: 3.0    # Negative bias so gate starts near 0 (sigmoid(-3) ≈ 0.05)
+  gate_bias: 0.0    # Threshold for binary gate: gate = 1 if gate_logit > gate_bias
   rgm_noise: false  # false = use rgm_mean only, true = sample with predicted logvar
-  prior_consistency_weight: 0.0  # Mahalanobis penalty encouraging gate opening (0.0 = disabled)
 
 scratch:
   # Actuator type: true = torque (matches imitation training), false = PD actuators

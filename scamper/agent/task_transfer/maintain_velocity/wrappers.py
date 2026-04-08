@@ -308,21 +308,22 @@ class PriorDecoderHighLevelWrapper(wrapper.Wrapper):
 
 
 class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
-    """Mode 3: Learned gate blends policy+prior with RGM -> decoder -> ctrl.
+    """Mode 3: Stochastic binary gate selects policy+prior or RGM.
 
     The policy outputs latent_size + 1: a residual vector and a single scalar
-    gate logit. The scalar gate controls the blend between
-    (residual + prior_mean) and rgm_z for all latent dimensions.
-    The gate is initialised near zero so the RGM dominates at the start.
+    gate logit. The gate is binarized via a hard threshold — PPO's Gaussian
+    sampling provides stochastic exploration of the binary choice, and PPO's
+    policy gradient learns which choice is better.
 
+    gate = 1 if gate_logit > gate_bias else 0
     latent = gate * (residual + prior_mean) + (1 - gate) * rgm_z
 
-    A prior consistency penalty (Mahalanobis distance between the final
-    latent and the prior distribution) encourages the gate to open by
-    penalizing deviation from the prior's predictions.
+    Each step uses either pure RGM or pure policy+prior, never a blend.
+    The policy learns state-dependent gating: e.g., RGM for exploration,
+    prior+residual when task reward is available.
 
-    At init:  gate ~ 0.05 -> latent ~ rgm_z  (naturalistic movement)
-    Trained:  gate ~ 1.0  -> latent ~ residual + prior_mean  (task transfer)
+    At init:  gate stochastically 0 or 1, biased toward 0 (RGM)
+    Trained:  gate -> 1 in task-relevant states (prior+residual)
     """
 
     def __init__(
@@ -333,12 +334,10 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         decoder_inference_fn: Callable,
         latent_size: int,
         proprio_size: int,
-        gate_scale: float = 5.0,
-        gate_bias: float = 3.0,
+        gate_bias: float = 0.0,
         rgm_noise: bool = False,
-        prior_consistency_weight: float = 0.0,
     ):
-        """Initialize the gated prior+rgm+decoder wrapper.
+        """Initialize the binary-gated prior+rgm+decoder wrapper.
 
         Args:
             env: Base environment with dict observations.
@@ -347,27 +346,19 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             decoder_inference_fn: Function (latent_proprio) -> (action, extras)
             latent_size: Dimension of the latent intention space.
             proprio_size: Size of proprioceptive observations.
-            gate_scale: Multiplier on gate logit before sigmoid. Larger values
-                make the gate more binary (on/off).
-            gate_bias: Negative bias so the gate starts near 0 at init.
-                sigmoid(-gate_bias) is the initial gate value (~0.05 for 3.0).
+            gate_bias: Threshold for the binary gate. Higher values bias
+                toward RGM initially. gate = 1 if gate_logit > gate_bias.
             rgm_noise: If True, sample RGM with its predicted logvar. If False,
                 use rgm_mean only (deterministic). False is recommended since
                 the policy+prior side already adds variation.
-            prior_consistency_weight: Weight for the prior consistency penalty
-                (Mahalanobis distance between final latent and prior). Higher
-                values encourage the gate to open by penalizing reliance on
-                the RGM. 0.0 disables the penalty.
         """
         self._prior_fn = prior_inference_fn
         self._rgm_fn = rgm_inference_fn
         self._decoder_fn = decoder_inference_fn
         self._latent_size = latent_size
         self._proprio_size = proprio_size
-        self._gate_scale = gate_scale
         self._gate_bias = gate_bias
         self._rgm_noise = rgm_noise
-        self._prior_consistency_weight = prior_consistency_weight
         super().__init__(env)
 
     def reset(
@@ -409,7 +400,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             metrics={
                 **state.metrics,
                 "gate": jp.float32(0.0),
-                "prior_consistency": jp.float32(0.0),
+                "gate_logit": jp.float32(0.0),
             },
             obs=_flatten_obs_for_policy(state.obs),
         )
@@ -417,10 +408,11 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         return state
 
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
-        """Take a step using gated blend of policy+prior and RGM.
+        """Take a step using stochastic binary gate to select motor program.
 
         The action has size latent_size + 1: the residual vector followed by
-        a single scalar gate logit that controls all dimensions.
+        a single scalar gate logit. The gate is binarized via hard threshold
+        — PPO's Gaussian sampling provides exploration of the binary choice.
 
         Args:
             state: Current environment state.
@@ -435,8 +427,8 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         residual = action[..., : self._latent_size]
         gate_logit = action[..., self._latent_size]
 
-        # Scalar gate: biased toward 0 at init so RGM dominates
-        gate = jax.nn.sigmoid(gate_logit * self._gate_scale - self._gate_bias)
+        # Binary gate: hard threshold, PPO handles gradient via sampling
+        gate = jp.where(gate_logit > self._gate_bias, 1.0, 0.0)
 
         # Frozen network outputs
         prior_mean, prior_logvar = self._prior_fn(proprio)
@@ -453,16 +445,8 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         else:
             rgm_z = rgm_mean
 
-        # Scalar blend: gate=0 -> RGM, gate=1 -> policy+prior
+        # Binary selection: gate=0 -> pure RGM, gate=1 -> pure policy+prior
         latent = gate * (residual + prior_mean) + (1.0 - gate) * rgm_z
-
-        # Prior consistency penalty: Mahalanobis distance between final
-        # latent and the prior distribution. Penalizes the latent for
-        # deviating from the prior's predictions, encouraging gate opening.
-        prior_var = jp.exp(prior_logvar)
-        prior_consistency = jp.sum(
-            (latent - prior_mean) ** 2 / prior_var, axis=-1
-        )
 
         state.info["rng"] = rng
 
@@ -482,18 +466,11 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             metrics={
                 **state.metrics,
                 "gate": gate,
-                "prior_consistency": prior_consistency,
+                "gate_logit": gate_logit,
             }
         )
 
         next_state = super().step(state, ctrl)
-
-        # Apply prior consistency penalty to reward
-        if self._prior_consistency_weight > 0.0:
-            next_state = next_state.replace(
-                reward=next_state.reward
-                - self._prior_consistency_weight * prior_consistency,
-            )
 
         next_state = next_state.replace(obs=_flatten_obs_for_policy(next_state.obs))
 

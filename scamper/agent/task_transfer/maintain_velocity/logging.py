@@ -68,6 +68,7 @@ def rollout_logging_fn(
         rollout.append(state)
 
     _log_reward_metrics(rollout, current_step)
+    _log_gate_metrics(rollout, current_step)
 
     # Render video on first eval and every render_every evals thereafter
     should_render = eval_count == 0 or eval_count % render_every == 0
@@ -129,6 +130,50 @@ def _log_reward_metrics(rollout: list[Any], current_step: int) -> None:
             )
     except Exception as e:
         logging.warning(f"Failed to log reward metrics: {e}")
+
+
+def _log_gate_metrics(rollout: list[Any], current_step: int) -> None:
+    """Log per-step gate metrics as line plots.
+
+    Creates plots showing gate value and gate logit over the episode,
+    useful for visualizing how quickly the gate switches between
+    RGM and policy+prior during evaluation.
+
+    Args:
+        rollout: List of environment states from the episode.
+        current_step: Current training step for versioning.
+    """
+    if not rollout or not hasattr(rollout[0], "metrics"):
+        return
+
+    first_metrics = rollout[0].metrics
+    gate_keys = sorted([k for k in first_metrics.keys() if k.startswith("gate")])
+
+    if not gate_keys:
+        return
+
+    columns = ["frame"] + gate_keys
+    data = []
+    for i, state in enumerate(rollout):
+        row = [i] + [float(state.metrics.get(k, 0.0)) for k in gate_keys]
+        data.append(row)
+
+    try:
+        table = wandb.Table(data=data, columns=columns)
+        for metric_name in gate_keys:
+            wandb.log(
+                {
+                    f"eval/{metric_name}_curve": wandb.plot.line(
+                        table,
+                        "frame",
+                        metric_name,
+                        title=f"{metric_name} (step {current_step})",
+                    )
+                },
+                commit=False,
+            )
+    except Exception as e:
+        logging.warning(f"Failed to log gate metrics: {e}")
 
 
 def _log_rollout_video(
@@ -220,7 +265,7 @@ def make_wandb_progress_with_offset(
         # Normalize accumulated per-step metrics to per-step averages
         if episode_length is not None:
             for key in list(metrics.keys()):
-                if "_gate" in key or "_prior_consistency" in key:
+                if "_gate" in key:
                     metrics[key] = metrics[key] / episode_length
 
         wandb.log(metrics)
