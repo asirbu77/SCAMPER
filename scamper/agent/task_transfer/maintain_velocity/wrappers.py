@@ -308,15 +308,16 @@ class PriorDecoderHighLevelWrapper(wrapper.Wrapper):
 
 
 class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
-    """Mode 3: Learned gate blends policy+prior with RGM -> decoder -> ctrl.
+    """Mode 3: Additive residual + gated base signal -> decoder -> ctrl.
 
     The policy outputs latent_size + 1: a residual vector and a single scalar
-    gate logit. The scalar gate controls the blend between
-    (residual + prior_mean) and rgm_z for all latent dimensions.
-    The gate is initialised near zero so the RGM dominates at the start.
+    gate logit. The residual always contributes to the latent (full gradient),
+    while the gate selects the base signal between prior_mean and rgm_z.
 
-    At init:  gate ~ 0.05 -> latent ~ rgm_z  (naturalistic movement)
-    Trained:  gate ~ 1.0  -> latent ~ action + prior_mean  (task transfer)
+    latent = residual + gate * prior_mean + (1 - gate) * rgm_z
+
+    At init:  gate ~ 0.05 -> latent ~ residual + rgm_z
+    Trained:  gate ~ 1.0  -> latent ~ residual + prior_mean
     """
 
     def __init__(
@@ -440,8 +441,10 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         else:
             rgm_z = rgm_mean
 
-        # Scalar blend: gate=0 -> RGM, gate=1 -> policy+prior
-        latent = gate * (residual + prior_mean) + (1.0 - gate) * rgm_z
+        # Additive residual: residual always contributes (full gradient),
+        # gate selects the base signal (prior_mean vs rgm_z)
+        # gate=0 -> residual + rgm_z, gate=1 -> residual + prior_mean
+        latent = residual + gate * prior_mean + (1.0 - gate) * rgm_z
 
         state.info["rng"] = rng
 
