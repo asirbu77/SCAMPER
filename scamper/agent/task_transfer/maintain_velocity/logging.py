@@ -217,10 +217,10 @@ def make_wandb_progress_with_offset(
         adjusted_step = num_steps + step_offset
         metrics["num_steps"] = adjusted_step
 
-        # Normalize accumulated gate metrics to per-step averages
+        # Normalize accumulated per-step metrics to per-step averages
         if episode_length is not None:
             for key in list(metrics.keys()):
-                if "_gate" in key:
+                if "_gate" in key or "_prior_consistency" in key:
                     metrics[key] = metrics[key] / episode_length
 
         wandb.log(metrics)

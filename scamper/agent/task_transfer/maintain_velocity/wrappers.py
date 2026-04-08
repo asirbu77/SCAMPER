@@ -308,16 +308,21 @@ class PriorDecoderHighLevelWrapper(wrapper.Wrapper):
 
 
 class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
-    """Mode 3: Additive residual + gated base signal -> decoder -> ctrl.
+    """Mode 3: Learned gate blends policy+prior with RGM -> decoder -> ctrl.
 
     The policy outputs latent_size + 1: a residual vector and a single scalar
-    gate logit. The residual always contributes to the latent (full gradient),
-    while the gate selects the base signal between prior_mean and rgm_z.
+    gate logit. The scalar gate controls the blend between
+    (residual + prior_mean) and rgm_z for all latent dimensions.
+    The gate is initialised near zero so the RGM dominates at the start.
 
-    latent = residual + gate * prior_mean + (1 - gate) * rgm_z
+    latent = gate * (residual + prior_mean) + (1 - gate) * rgm_z
 
-    At init:  gate ~ 0.05 -> latent ~ residual + rgm_z
-    Trained:  gate ~ 1.0  -> latent ~ residual + prior_mean
+    A prior consistency penalty (Mahalanobis distance between the final
+    latent and the prior distribution) encourages the gate to open by
+    penalizing deviation from the prior's predictions.
+
+    At init:  gate ~ 0.05 -> latent ~ rgm_z  (naturalistic movement)
+    Trained:  gate ~ 1.0  -> latent ~ residual + prior_mean  (task transfer)
     """
 
     def __init__(
@@ -331,6 +336,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         gate_scale: float = 5.0,
         gate_bias: float = 3.0,
         rgm_noise: bool = False,
+        prior_consistency_weight: float = 0.0,
     ):
         """Initialize the gated prior+rgm+decoder wrapper.
 
@@ -348,6 +354,10 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             rgm_noise: If True, sample RGM with its predicted logvar. If False,
                 use rgm_mean only (deterministic). False is recommended since
                 the policy+prior side already adds variation.
+            prior_consistency_weight: Weight for the prior consistency penalty
+                (Mahalanobis distance between final latent and prior). Higher
+                values encourage the gate to open by penalizing reliance on
+                the RGM. 0.0 disables the penalty.
         """
         self._prior_fn = prior_inference_fn
         self._rgm_fn = rgm_inference_fn
@@ -357,6 +367,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         self._gate_scale = gate_scale
         self._gate_bias = gate_bias
         self._rgm_noise = rgm_noise
+        self._prior_consistency_weight = prior_consistency_weight
         super().__init__(env)
 
     def reset(
@@ -393,11 +404,12 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         state.info["final_latent"] = jp.zeros_like(prior_mean)
         state.info["rng"] = rng
 
-        # Gate metric in state.metrics so Brax's EpisodeWrapper logs it
+        # Gate metrics in state.metrics so Brax's EpisodeWrapper logs them
         state = state.replace(
             metrics={
                 **state.metrics,
                 "gate": jp.float32(0.0),
+                "prior_consistency": jp.float32(0.0),
             },
             obs=_flatten_obs_for_policy(state.obs),
         )
@@ -441,10 +453,16 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         else:
             rgm_z = rgm_mean
 
-        # Additive residual: residual always contributes (full gradient),
-        # gate selects the base signal (prior_mean vs rgm_z)
-        # gate=0 -> residual + rgm_z, gate=1 -> residual + prior_mean
-        latent = residual + gate * prior_mean + (1.0 - gate) * rgm_z
+        # Scalar blend: gate=0 -> RGM, gate=1 -> policy+prior
+        latent = gate * (residual + prior_mean) + (1.0 - gate) * rgm_z
+
+        # Prior consistency penalty: Mahalanobis distance between final
+        # latent and the prior distribution. Penalizes the latent for
+        # deviating from the prior's predictions, encouraging gate opening.
+        prior_var = jp.exp(prior_logvar)
+        prior_consistency = jp.sum(
+            (latent - prior_mean) ** 2 / prior_var, axis=-1
+        )
 
         state.info["rng"] = rng
 
@@ -464,10 +482,18 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             metrics={
                 **state.metrics,
                 "gate": gate,
+                "prior_consistency": prior_consistency,
             }
         )
 
         next_state = super().step(state, ctrl)
+
+        # Apply prior consistency penalty to reward
+        if self._prior_consistency_weight > 0.0:
+            next_state = next_state.replace(
+                reward=next_state.reward
+                - self._prior_consistency_weight * prior_consistency,
+            )
 
         next_state = next_state.replace(obs=_flatten_obs_for_policy(next_state.obs))
 

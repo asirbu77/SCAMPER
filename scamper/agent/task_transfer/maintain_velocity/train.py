@@ -278,6 +278,9 @@ def main(cfg: DictConfig) -> None:
                 gate_scale=mode_cfg.gate_scale,
                 gate_bias=mode_cfg.gate_bias,
                 rgm_noise=mode_cfg.rgm_noise,
+                prior_consistency_weight=mode_cfg.get(
+                    "prior_consistency_weight", 0.0
+                ),
             )
         else:  # prior_decoder or distill
             prior_fn = make_prior_inference_fn(
