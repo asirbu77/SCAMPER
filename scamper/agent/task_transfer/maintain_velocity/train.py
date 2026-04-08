@@ -276,6 +276,7 @@ def main(cfg: DictConfig) -> None:
                 latent_size,
                 proprio_size,
                 gate_bias=mode_cfg.gate_bias,
+                gate_margin=mode_cfg.get("gate_margin", 0.0),
                 rgm_noise=mode_cfg.rgm_noise,
             )
         else:  # prior_decoder or distill

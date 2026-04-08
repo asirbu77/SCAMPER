@@ -39,6 +39,7 @@ distill:
 
 distill_prior:
   gate_bias: 0.0    # Threshold for binary gate: gate = 1 if gate_logit > gate_bias
+  gate_margin: 0.0  # Hysteresis margin for bistable switching (0.0 = no hysteresis)
   rgm_noise: false  # false = use rgm_mean only, true = sample with predicted logvar
 
 scratch:

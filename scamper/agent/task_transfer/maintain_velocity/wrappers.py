@@ -335,6 +335,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         latent_size: int,
         proprio_size: int,
         gate_bias: float = 0.0,
+        gate_margin: float = 0.0,
         rgm_noise: bool = False,
     ):
         """Initialize the binary-gated prior+rgm+decoder wrapper.
@@ -348,6 +349,10 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             proprio_size: Size of proprioceptive observations.
             gate_bias: Threshold for the binary gate. Higher values bias
                 toward RGM initially. gate = 1 if gate_logit > gate_bias.
+            gate_margin: Hysteresis margin for bistable gate switching.
+                Switching on requires gate_logit > gate_bias + gate_margin,
+                switching off requires gate_logit < gate_bias - gate_margin.
+                0.0 disables hysteresis.
             rgm_noise: If True, sample RGM with its predicted logvar. If False,
                 use rgm_mean only (deterministic). False is recommended since
                 the policy+prior side already adds variation.
@@ -358,6 +363,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         self._latent_size = latent_size
         self._proprio_size = proprio_size
         self._gate_bias = gate_bias
+        self._gate_margin = gate_margin
         self._rgm_noise = rgm_noise
         super().__init__(env)
 
@@ -394,6 +400,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
 
         state.info["final_latent"] = jp.zeros_like(prior_mean)
         state.info["rng"] = rng
+        state.info["prev_gate"] = jp.float32(0.0)
 
         # Gate metrics in state.metrics so Brax's EpisodeWrapper logs them
         state = state.replace(
@@ -427,8 +434,18 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         residual = action[..., : self._latent_size]
         gate_logit = action[..., self._latent_size]
 
-        # Binary gate: hard threshold, PPO handles gradient via sampling
-        gate = jp.where(gate_logit > self._gate_bias, 1.0, 0.0)
+        # Binary gate with hysteresis: once committed to a state, the gate
+        # stays until the logit crosses the far threshold (bistable dynamics)
+        prev_gate = state.info["prev_gate"]
+        upper = self._gate_bias + self._gate_margin
+        lower = self._gate_bias - self._gate_margin
+        gate = jp.where(
+            prev_gate > 0.5,
+            # Currently 1 (prior+residual): stay unless logit drops below lower
+            jp.where(gate_logit < lower, 0.0, 1.0),
+            # Currently 0 (RGM): stay unless logit rises above upper
+            jp.where(gate_logit > upper, 1.0, 0.0),
+        )
 
         # Frozen network outputs
         prior_mean, prior_logvar = self._prior_fn(proprio)
@@ -449,6 +466,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         latent = gate * (residual + prior_mean) + (1.0 - gate) * rgm_z
 
         state.info["rng"] = rng
+        state.info["prev_gate"] = gate
 
         latent_proprio = jp.concatenate([latent, proprio], axis=-1)
 
