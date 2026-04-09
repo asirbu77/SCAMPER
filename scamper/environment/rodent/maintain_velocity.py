@@ -37,11 +37,11 @@ def default_config() -> config_dict.ConfigDict:
         arena_xml_path=consts.ARENA_XML_PATH,
         ctrl_dt=0.01,
         sim_dt=0.002,
-        solver="cg",
+        solver="newton",
         mujoco_impl="jax",
         naconmax=16 * 8192,
-        njmax=512,
-        iterations=10,
+        njmax=1000,
+        iterations=5,
         ls_iterations=5,
         noslip_iterations=0,
         torque_actuators=True,
@@ -145,11 +145,10 @@ class MaintainVelocity(rodent_base.RodentEnv):
         data = mjx_env.step(self.mjx_model, state.data, action, n_steps)
 
         info = state.info
-        obs = self._get_obs(data, info)
-
         info["prev_action"] = info["action"]
         info["action"] = action
 
+        obs = self._get_obs(data, info)
         done = self._is_done(data, info, state.metrics)
         reward = self._get_reward(data, info, state.metrics)
         reward = jp.nan_to_num(reward)

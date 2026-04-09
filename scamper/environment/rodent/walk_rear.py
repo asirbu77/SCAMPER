@@ -169,10 +169,10 @@ class WalkRear(rodent_base.RodentEnv):
 
         info = state.info
         info["episode_step"] = info["episode_step"] + 1
-        obs = self._get_obs(data, info)
-
         info["prev_action"] = info["action"]
         info["action"] = action
+
+        obs = self._get_obs(data, info)
 
         # Check if skull is within tolerance of target
         skull_pos = self._get_skull_pos(data)
