@@ -24,6 +24,9 @@ from brax.training.acme import running_statistics, specs
 from omegaconf import DictConfig, OmegaConf
 
 from scamper.agent import checkpointing
+from scamper.agent.distill_prior.distill_prior_networks import (
+    create_abstract_distill_prior_policy,
+)
 from scamper.agent.imitation import intention_network
 from scamper.agent.mlp_prior.prior_networks import Prior
 from scamper.agent.observation_utils import (
@@ -125,6 +128,68 @@ def load_prior_checkpoint(
         encoder_params,
         prior_params,
         decoder_params,
+        normalizer_params,
+        OmegaConf.to_container(cfg),
+    )
+
+
+def load_distill_prior_checkpoint(
+    checkpoint_path: str,
+    step: int | None = None,
+) -> Tuple[Dict, Dict, Dict, Dict, DictRunningStatisticsState, Dict]:
+    """Load encoder, prior, decoder, and RGM parameters from a distill_prior checkpoint.
+
+    The distill_prior checkpoint has four networks (encoder, decoder, prior, rgm)
+    stored under the ``policy`` key with step prefix ``DistillPriorNetwork``.
+
+    Args:
+        checkpoint_path: Path to the distill_prior checkpoint directory.
+        step: Specific step to load. If None, loads the latest.
+
+    Returns:
+        Tuple of (encoder_params, prior_params, decoder_params, rgm_params,
+                  normalizer_params, config_dict).
+        normalizer_params is DictRunningStatisticsState.
+    """
+    step_prefix = "DistillPriorNetwork"
+    mgr_options = ocp.CheckpointManagerOptions(create=False, step_prefix=step_prefix)
+
+    with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as ckpt_mgr:
+        if step is None:
+            step = ckpt_mgr.latest_step()
+
+        cfg = ckpt_mgr.restore(
+            step,
+            args=ocp.args.Composite(config=ocp.args.JsonRestore()),
+        )["config"]
+
+    cfg = OmegaConf.create(cfg)
+
+    rgm_hidden_layer_sizes = tuple(cfg.network_config.rgm_layer_sizes)
+
+    abstract_policy = create_abstract_distill_prior_policy(
+        OmegaConf.to_container(cfg), rgm_hidden_layer_sizes
+    )
+
+    mgr_options2 = ocp.CheckpointManagerOptions(create=False, step_prefix=step_prefix)
+    with ocp.CheckpointManager(checkpoint_path, options=mgr_options2) as ckpt_mgr:
+        policy_params = ckpt_mgr.restore(
+            step,
+            args=ocp.args.Composite(policy=ocp.args.StandardRestore(abstract_policy)),
+        )["policy"]
+
+    normalizer_params, network_params = policy_params
+
+    encoder_params = network_params["params"]["encoder"]
+    prior_params = network_params["params"]["prior"]
+    decoder_params = network_params["params"]["decoder"]
+    rgm_params = network_params["params"]["rgm"]
+
+    return (
+        encoder_params,
+        prior_params,
+        decoder_params,
+        rgm_params,
         normalizer_params,
         OmegaConf.to_container(cfg),
     )
@@ -383,6 +448,51 @@ def make_prior_inference_fn(
     return prior_fn
 
 
+def make_rgm_inference_fn(
+    rgm_params: Dict,
+    normalizer_params: DictRunningStatisticsState,
+    config: Dict,
+) -> Callable:
+    """Create RGM inference function for PriorRGMDecoderHighLevelWrapper.
+
+    The RGM has the same architecture as Prior (proprio -> (mean, logvar)).
+
+    Args:
+        rgm_params: Frozen RGM parameters.
+        normalizer_params: Dict normalizer with proprioception stats.
+        config: Checkpoint config dict.
+
+    Returns:
+        Function (proprio) -> (mean, logvar)
+    """
+    latent_size = config["network_config"]["intention_size"]
+    rgm_hidden_layer_sizes = tuple(config["network_config"]["rgm_layer_sizes"])
+
+    rgm_module = Prior(
+        layer_sizes=list(rgm_hidden_layer_sizes),
+        latents=latent_size,
+    )
+
+    proprio_normalizer = normalizer_params.proprioception
+
+    def rgm_fn(proprio: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """Apply RGM to proprioceptive observations.
+
+        Args:
+            proprio: Proprioceptive observations.
+
+        Returns:
+            Tuple of (mean, logvar) for latent distribution.
+        """
+        normalized_proprio = running_statistics.normalize(proprio, proprio_normalizer)
+
+        mean, logvar = rgm_module.apply({"params": rgm_params}, normalized_proprio)
+
+        return mean, logvar
+
+    return rgm_fn
+
+
 # ---------------------------------------------------------------------------
 # Task transfer checkpointing and preemption recovery
 # ---------------------------------------------------------------------------
@@ -417,6 +527,10 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
         )
     elif cfg.mode == "distill":
         hashable["distill"] = OmegaConf.to_container(cfg.distill, resolve=True)
+    elif cfg.mode == "distill_prior":
+        hashable["distill_prior"] = OmegaConf.to_container(
+            cfg.distill_prior, resolve=True
+        )
     cfg_str = json.dumps(hashable, sort_keys=True, default=str)
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]
 

@@ -1,21 +1,23 @@
 # Arena Forage Task Transfer Training Config
 #
-# Four training modes:
+# Five training modes:
 #   decoder_only: Freeze decoder, train new encoder
 #   prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
 #   distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
+#   distill_prior: Freeze prior + rgm + decoder, train residual encoder (from distill_prior checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
 # Usage:
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=decoder_only
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_decoder
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=distill
+#   python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 
 defaults:
   - _self_
 
-# Training mode: "decoder_only", "prior_decoder", "distill", or "scratch"
+# Training mode: "decoder_only", "prior_decoder", "distill", "distill_prior", or "scratch"
 mode: "decoder_only"
 
 # Checkpoint to load (mlp_prior checkpoint)
@@ -37,6 +39,12 @@ prior_decoder:
 distill:
   deterministic_prior: true
   noise_logvar: -2.0
+
+distill_prior:
+  gate_bias: 0.0    # Threshold for binary gate: gate = 1 if gate_logit > gate_bias
+  gate_margin: 0.0  # Hysteresis margin for bistable switching (0.0 = no hysteresis)
+  rgm_noise: false  # false = use rgm_mean only, true = sample with predicted logvar
+  lab_lambda: 1.0   # LAB scale: residual bounded within lab_lambda * prior_std of prior_mean
 
 scratch:
   # Actuator type: true = torque (matches imitation training), false = PD actuators
