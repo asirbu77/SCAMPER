@@ -448,7 +448,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
 
         state.info["final_latent"] = jp.zeros_like(prior_mean)
         state.info["rng"] = rng
-        state.info["prev_gate"] = jp.float32(1.0)
+        state.info["prev_gate"] = jp.float32(0.0)
 
         state = state.replace(
             metrics={
