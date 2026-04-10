@@ -284,6 +284,7 @@ def main(cfg: DictConfig) -> None:
             )
             rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
             mode_cfg = cfg.distill_prior
+            rgm_logvar = mode_cfg.get("rgm_logvar", None)
             return PriorRGMDecoderHighLevelWrapper(
                 base_env,
                 prior_fn,
@@ -294,6 +295,7 @@ def main(cfg: DictConfig) -> None:
                 gate_bias=mode_cfg.gate_bias,
                 gate_margin=mode_cfg.get("gate_margin", 0.0),
                 rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=rgm_logvar,
             )
         else:  # prior_decoder or distill
             prior_fn = make_prior_inference_fn(

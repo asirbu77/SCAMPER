@@ -375,6 +375,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         gate_bias: float = 0.0,
         gate_margin: float = 0.0,
         rgm_noise: bool = False,
+        rgm_logvar: float | None = None,
     ):
         """Initialize the binary-gated prior+rgm+decoder wrapper.
 
@@ -391,9 +392,11 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
                 Switching on requires gate_logit > gate_bias + gate_margin,
                 switching off requires gate_logit < gate_bias - gate_margin.
                 0.0 disables hysteresis.
-            rgm_noise: If True, sample RGM with its predicted logvar. If False,
-                use rgm_mean only (deterministic). False is recommended since
-                the policy+prior side already adds variation.
+            rgm_noise: If True, sample RGM latent with noise. If False,
+                use rgm_mean only (deterministic).
+            rgm_logvar: Fixed log-variance for RGM sampling. Only used when
+                rgm_noise=True. If None, uses the RGM's predicted logvar.
+                If a float, overrides the predicted logvar with this value.
         """
         self._prior_fn = prior_inference_fn
         self._rgm_fn = rgm_inference_fn
@@ -403,6 +406,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         self._gate_bias = gate_bias
         self._gate_margin = gate_margin
         self._rgm_noise = rgm_noise
+        self._rgm_logvar = rgm_logvar
         super().__init__(env)
 
     def reset(
@@ -485,7 +489,10 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         rng = state.info.get("rng", jax.random.PRNGKey(0))
         rng, noise_rng = jax.random.split(rng)
         if self._rgm_noise:
-            rgm_std = jp.exp(0.5 * rgm_logvar)
+            if self._rgm_logvar is not None:
+                rgm_std = jp.exp(0.5 * self._rgm_logvar)
+            else:
+                rgm_std = jp.exp(0.5 * rgm_logvar)
             rgm_z = rgm_mean + jax.random.normal(
                 noise_rng, shape=rgm_mean.shape
             ) * rgm_std
