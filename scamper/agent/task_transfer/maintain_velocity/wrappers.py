@@ -318,11 +318,11 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
     gate = 1 if gate_logit > gate_bias else 0
 
     When gate=1, the residual is applied via a Latent Action Barrier (LAB):
-    latent = prior_mean + lab_lambda * prior_std * tanh(residual)
+    latent = prior_mean + lab_lambda * prior_std * residual
 
-    This bounds the residual within lab_lambda standard deviations of the
-    prior, scaled per-dimension by the prior's own uncertainty. At random
-    init the residual is near zero (tanh(~0) ≈ 0), so latent ≈ prior_mean.
+    The residual is already in (-1, 1) from Brax's NormalTanhDistribution,
+    so this bounds the latent within lab_lambda standard deviations of the
+    prior, scaled per-dimension by the prior's own uncertainty.
 
     When gate=0, the RGM mean (or sample) is used directly:
     latent = rgm_z
@@ -478,8 +478,9 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             rgm_z = rgm_mean
 
         # LAB: bound residual within lab_lambda * prior_std of prior_mean
+        # (residual is already in (-1, 1) from Brax's NormalTanhDistribution)
         prior_std = jp.exp(0.5 * prior_logvar)
-        lab_residual = prior_mean + self._lab_lambda * prior_std * jp.tanh(residual)
+        lab_residual = prior_mean + self._lab_lambda * prior_std * residual
 
         # Binary selection: gate=0 -> pure RGM, gate=1 -> LAB (prior + bounded residual)
         latent = gate * lab_residual + (1.0 - gate) * rgm_z
