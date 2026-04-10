@@ -531,6 +531,8 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
         hashable["distill_prior"] = OmegaConf.to_container(
             cfg.distill_prior, resolve=True
         )
+    elif cfg.mode == "rgm_only":
+        hashable["rgm_only"] = OmegaConf.to_container(cfg.rgm_only, resolve=True)
     cfg_str = json.dumps(hashable, sort_keys=True, default=str)
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]
 

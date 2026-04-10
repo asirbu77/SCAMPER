@@ -1,10 +1,11 @@
 """Arena forage task transfer training with Brax PPO.
 
-Five training modes:
+Six training modes:
 - decoder_only: Freeze decoder, train new encoder
 - prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
 - distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
-- distill_prior: Freeze prior + rgm + decoder, train residual encoder (from distill_prior checkpoint)
+- distill_prior: Freeze prior + rgm + decoder, train residual + gate (from distill_prior checkpoint)
+- rgm_only: Freeze rgm + decoder, train residual added to rgm mean (from distill_prior checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
@@ -14,6 +15,7 @@ Usage:
     python -m scamper.agent.task_transfer.arena_forage.train mode=prior_decoder
     python -m scamper.agent.task_transfer.arena_forage.train mode=distill
     python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior
+    python -m scamper.agent.task_transfer.arena_forage.train mode=rgm_only
     python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 """
 
@@ -78,6 +80,7 @@ from scamper.agent.task_transfer.arena_forage.wrappers import (
     FlatObsWrapper,
     PriorDecoderHighLevelWrapper,
     PriorRGMDecoderHighLevelWrapper,
+    RGMDecoderHighLevelWrapper,
 )
 from scamper.agent.task_transfer.arena_forage.scratch_networks import (
     make_scratch_ppo_networks,
@@ -157,7 +160,7 @@ def main(cfg: DictConfig) -> None:
     # ----------------------------------------------------------------
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
 
-    if cfg.mode == "distill_prior":
+    if cfg.mode in ("distill_prior", "rgm_only"):
         logging.info(f"Loading distill_prior checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
@@ -203,7 +206,7 @@ def main(cfg: DictConfig) -> None:
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
-    if cfg.mode == "distill_prior":
+    if cfg.mode in ("distill_prior", "rgm_only"):
         frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
@@ -294,6 +297,19 @@ def main(cfg: DictConfig) -> None:
                 proprio_size,
                 gate_bias=mode_cfg.gate_bias,
                 gate_margin=mode_cfg.get("gate_margin", 0.0),
+                rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=rgm_logvar,
+            )
+        elif cfg.mode == "rgm_only":
+            rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
+            mode_cfg = cfg.rgm_only
+            rgm_logvar = mode_cfg.get("rgm_logvar", None)
+            return RGMDecoderHighLevelWrapper(
+                base_env,
+                rgm_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
                 rgm_noise=mode_cfg.rgm_noise,
                 rgm_logvar=rgm_logvar,
             )
