@@ -350,12 +350,8 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
 
     gate = 1 if gate_logit > gate_bias else 0
 
-    When gate=1, the residual is applied via a Latent Action Barrier (LAB):
-    latent = prior_mean + lab_lambda * prior_std * tanh(residual)
-
-    This bounds the residual within lab_lambda standard deviations of the
-    prior, scaled per-dimension by the prior's own uncertainty. At random
-    init the residual is near zero (tanh(~0) ≈ 0), so latent ≈ prior_mean.
+    When gate=1, the residual is added to the prior mean:
+    latent = prior_mean + residual
 
     When gate=0, the RGM mean (or sample) is used directly:
     latent = rgm_z
@@ -364,7 +360,7 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
     The policy learns state-dependent gating: e.g., RGM for exploration,
     prior+residual when task reward is available.
 
-    At init:  gate = 1 (prior+residual via LAB, near-zero residual)
+    At init:  gate = 1 (prior+residual, near-zero residual)
     Trained:  gate -> 0 in states where RGM is better
     """
 
@@ -379,7 +375,6 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         gate_bias: float = 0.0,
         gate_margin: float = 0.0,
         rgm_noise: bool = False,
-        lab_lambda: float = 1.0,
     ):
         """Initialize the binary-gated prior+rgm+decoder wrapper.
 
@@ -399,10 +394,6 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
             rgm_noise: If True, sample RGM with its predicted logvar. If False,
                 use rgm_mean only (deterministic). False is recommended since
                 the policy+prior side already adds variation.
-            lab_lambda: Latent Action Barrier scale factor. Controls how many
-                prior standard deviations the residual can deviate. Higher
-                values allow larger corrections. At random init the residual
-                is near zero regardless of this value.
         """
         self._prior_fn = prior_inference_fn
         self._rgm_fn = rgm_inference_fn
@@ -412,7 +403,6 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         self._gate_bias = gate_bias
         self._gate_margin = gate_margin
         self._rgm_noise = rgm_noise
-        self._lab_lambda = lab_lambda
         super().__init__(env)
 
     def reset(
@@ -502,10 +492,11 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
         else:
             rgm_z = rgm_mean
 
-        prior_std = jp.exp(0.5 * prior_logvar)
-        lab_residual = prior_mean + self._lab_lambda * prior_std * jp.tanh(residual)
+        # Prior + residual
+        prior_residual = prior_mean + residual
 
-        latent = gate * lab_residual + (1.0 - gate) * rgm_z
+        # Binary selection: gate=0 -> pure RGM, gate=1 -> prior + residual
+        latent = gate * prior_residual + (1.0 - gate) * rgm_z
 
         state.info["rng"] = rng
         state.info["prev_gate"] = gate

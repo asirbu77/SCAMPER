@@ -294,7 +294,6 @@ def main(cfg: DictConfig) -> None:
                 gate_bias=mode_cfg.gate_bias,
                 gate_margin=mode_cfg.get("gate_margin", 0.0),
                 rgm_noise=mode_cfg.rgm_noise,
-                lab_lambda=mode_cfg.get("lab_lambda", 1.0),
             )
         else:  # prior_decoder or distill
             prior_fn = make_prior_inference_fn(
