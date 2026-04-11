@@ -133,6 +133,20 @@ def parse_args() -> argparse.Namespace:
         default="distill",
         help="Type of checkpoint to load (default: distill)",
     )
+    parser.add_argument(
+        "--mujoco-impl",
+        type=str,
+        choices=["jax", "warp"],
+        default=None,
+        help="Override mujoco_impl backend (default: use checkpoint config)",
+    )
+    parser.add_argument(
+        "--xml-variant",
+        type=str,
+        choices=["limited-collisions", "full-collisions", "no-tail-collisions"],
+        default=None,
+        help="Override walker XML variant (default: use checkpoint config)",
+    )
 
     return parser.parse_args()
 
@@ -585,6 +599,24 @@ def _setup_environment(args, cfg):
         Tuple of (cfg, env, reference_clips, num_clips, num_steps,
                   reference_obs_size, proprioceptive_obs_size, intention_size).
     """
+    # Apply CLI overrides to checkpoint config before environment creation
+    OmegaConf.set_struct(cfg.env_config, False)
+    if args.mujoco_impl is not None:
+        print(f"  Overriding mujoco_impl: {cfg.env_config.mujoco_impl} -> {args.mujoco_impl}")
+        OmegaConf.update(cfg.env_config, "mujoco_impl", args.mujoco_impl)
+    if args.xml_variant is not None:
+        from scamper.environment.rodent import consts as rodent_consts
+
+        xml_map = {
+            "limited-collisions": str(rodent_consts.RODENT_XML_PATH),
+            "full-collisions": str(rodent_consts.RODENT_FULL_COLLISION_XML),
+            "no-tail-collisions": str(rodent_consts.RODENT_NO_TAIL_COLLISION_XML),
+        }
+        new_xml_path = xml_map[args.xml_variant]
+        print(f"  Overriding walker_xml_path: {cfg.env_config.get('walker_xml_path', 'N/A')} -> {new_xml_path}")
+        OmegaConf.update(cfg.env_config, "walker_xml_path", new_xml_path)
+    OmegaConf.set_struct(cfg.env_config, True)
+
     cfg = fix_config_paths(cfg, args.data_path_override, args.batch_size)
 
     reference_obs_size, proprioceptive_obs_size, total_obs_size = get_observation_sizes(
