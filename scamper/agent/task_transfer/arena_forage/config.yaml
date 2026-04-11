@@ -1,10 +1,11 @@
 # Arena Forage Task Transfer Training Config
 #
-# Six training modes:
+# Seven training modes:
 #   decoder_only: Freeze decoder, train new encoder
 #   prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
 #   distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
 #   distill_prior: Freeze prior + rgm + decoder, train residual + gate (from distill_prior checkpoint)
+#   distill_prior_no_rgm: Freeze prior + decoder, train residual (from distill_prior checkpoint, ignores rgm/gate)
 #   rgm_only: Freeze rgm + decoder, train residual added to rgm mean (from distill_prior checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
@@ -13,13 +14,14 @@
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_decoder
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=distill
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior
+#   python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior_no_rgm
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=rgm_only
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 
 defaults:
   - _self_
 
-# Training mode: "decoder_only", "prior_decoder", "distill", "distill_prior", or "scratch"
+# Training mode: "decoder_only", "prior_decoder", "distill", "distill_prior", "distill_prior_no_rgm", "rgm_only", or "scratch"
 mode: "decoder_only"
 
 # Checkpoint to load (mlp_prior checkpoint)
@@ -47,6 +49,10 @@ distill_prior:
   gate_margin: 0.0  # Hysteresis margin for bistable switching (0.0 = no hysteresis)
   rgm_noise: false  # false = use rgm_mean only, true = sample with noise
   rgm_logvar: null   # null = use predicted logvar, float = fixed logvar (only when rgm_noise=true)
+
+distill_prior_no_rgm:
+  deterministic_prior: true
+  noise_logvar: -2.0
 
 rgm_only:
   rgm_noise: false  # false = use rgm_mean only, true = sample with noise

@@ -3,6 +3,7 @@
 Five wrapper classes for different transfer learning modes:
 - DecoderHighLevelWrapper: Policy outputs latent -> frozen decoder -> ctrl
 - PriorDecoderHighLevelWrapper: Policy outputs residual -> add to prior mean -> decoder -> ctrl
+  (used by prior_decoder, distill, and distill_prior_no_rgm modes)
 - RGMDecoderHighLevelWrapper: Policy outputs residual -> add to rgm mean -> decoder -> ctrl
 - PriorRGMDecoderHighLevelWrapper: Policy outputs residual + gate -> select prior or rgm -> decoder -> ctrl
 - FlatObsWrapper: Converts dict observations to flat arrays (for scratch mode)

@@ -1,10 +1,11 @@
 """Arena forage task transfer training with Brax PPO.
 
-Six training modes:
+Seven training modes:
 - decoder_only: Freeze decoder, train new encoder
 - prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
 - distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
 - distill_prior: Freeze prior + rgm + decoder, train residual + gate (from distill_prior checkpoint)
+- distill_prior_no_rgm: Freeze prior + decoder, train residual (from distill_prior checkpoint, ignores rgm/gate)
 - rgm_only: Freeze rgm + decoder, train residual added to rgm mean (from distill_prior checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
@@ -15,6 +16,7 @@ Usage:
     python -m scamper.agent.task_transfer.arena_forage.train mode=prior_decoder
     python -m scamper.agent.task_transfer.arena_forage.train mode=distill
     python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior
+    python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior_no_rgm
     python -m scamper.agent.task_transfer.arena_forage.train mode=rgm_only
     python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 """
@@ -160,7 +162,7 @@ def main(cfg: DictConfig) -> None:
     # ----------------------------------------------------------------
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
 
-    if cfg.mode in ("distill_prior", "rgm_only"):
+    if cfg.mode in ("distill_prior", "distill_prior_no_rgm", "rgm_only"):
         logging.info(f"Loading distill_prior checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
@@ -206,7 +208,7 @@ def main(cfg: DictConfig) -> None:
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
-    if cfg.mode in ("distill_prior", "rgm_only"):
+    if cfg.mode in ("distill_prior", "distill_prior_no_rgm", "rgm_only"):
         frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
@@ -313,11 +315,16 @@ def main(cfg: DictConfig) -> None:
                 rgm_noise=mode_cfg.rgm_noise,
                 rgm_logvar=rgm_logvar,
             )
-        else:  # prior_decoder or distill
+        else:  # prior_decoder, distill, or distill_prior_no_rgm
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
-            mode_cfg = cfg.distill if cfg.mode == "distill" else cfg.prior_decoder
+            if cfg.mode == "distill":
+                mode_cfg = cfg.distill
+            elif cfg.mode == "distill_prior_no_rgm":
+                mode_cfg = cfg.distill_prior_no_rgm
+            else:
+                mode_cfg = cfg.prior_decoder
             return PriorDecoderHighLevelWrapper(
                 base_env,
                 prior_fn,
