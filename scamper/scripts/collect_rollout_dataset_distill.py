@@ -147,6 +147,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override walker XML variant (default: use checkpoint config)",
     )
+    parser.add_argument(
+        "--naconmax",
+        type=int,
+        default=None,
+        help="Override naconmax (default: use checkpoint config)",
+    )
+    parser.add_argument(
+        "--njmax",
+        type=int,
+        default=None,
+        help="Override njmax (default: use checkpoint config)",
+    )
 
     return parser.parse_args()
 
@@ -615,6 +627,12 @@ def _setup_environment(args, cfg):
         new_xml_path = xml_map[args.xml_variant]
         print(f"  Overriding walker_xml_path: {cfg.env_config.get('walker_xml_path', 'N/A')} -> {new_xml_path}")
         OmegaConf.update(cfg.env_config, "walker_xml_path", new_xml_path)
+    if args.naconmax is not None:
+        print(f"  Overriding naconmax: {cfg.env_config.get('naconmax', 'N/A')} -> {args.naconmax}")
+        OmegaConf.update(cfg.env_config, "naconmax", args.naconmax)
+    if args.njmax is not None:
+        print(f"  Overriding njmax: {cfg.env_config.get('njmax', 'N/A')} -> {args.njmax}")
+        OmegaConf.update(cfg.env_config, "njmax", args.njmax)
     OmegaConf.set_struct(cfg.env_config, True)
 
     cfg = fix_config_paths(cfg, args.data_path_override, args.batch_size)
