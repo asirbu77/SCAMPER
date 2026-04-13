@@ -520,6 +520,7 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
         "network": OmegaConf.to_container(cfg.network, resolve=True),
         "train": OmegaConf.to_container(cfg.train, resolve=True),
         "env": OmegaConf.to_container(cfg.env, resolve=True),
+        "exp_name": cfg.logging.exp_name,
     }
     if cfg.mode == "prior_decoder":
         hashable["prior_decoder"] = OmegaConf.to_container(
