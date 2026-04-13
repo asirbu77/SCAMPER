@@ -127,7 +127,7 @@ class ArenaForage(rodent_base.RodentEnv):
         self.compile()
 
     def reset(self, rng: jax.Array) -> mjx_env.State:
-        rng, treat_rng = jax.random.split(rng)
+        rng, treat_rng, yaw_rng = jax.random.split(rng, 3)
 
         num_treats = self._config.num_treats
         spawn_radius = self._config.spawn_radius
@@ -177,6 +177,16 @@ class ArenaForage(rodent_base.RodentEnv):
             naconmax=self._config.naconmax,
             njmax=self._config.njmax,
         )
+
+        # Randomize yaw (rotation about z-axis) so the rodent doesn't
+        # always start facing the same direction.  qpos[3:7] is the root
+        # quaternion (w, x, y, z).  A z-rotation quaternion is
+        # (cos(θ/2), 0, 0, sin(θ/2)).
+        yaw = jax.random.uniform(yaw_rng, (), minval=0, maxval=2 * jp.pi)
+        yaw_quat = jp.array([jp.cos(yaw / 2), 0.0, 0.0, jp.sin(yaw / 2)])
+        qpos = data.qpos.at[3:7].set(yaw_quat)
+        data = data.replace(qpos=qpos)
+
         data = mjx.forward(self.mjx_model, data)
 
         # Initialize prev_scent for potential-based shaping
