@@ -170,13 +170,22 @@ def run_rollouts(env, policy_fn, starting_state, max_steps, rng_keys):
     return all_states
 
 
+def get_unwrapped_env(env):
+    """Unwrap to the underlying Imitation environment."""
+    while hasattr(env, "_env"):
+        env = env._env
+    return env
+
+
 def render_rollout(env, states, num_steps, camera, height=480, width=640):
     """Render a single rollout to a list of frames."""
     states_list = []
     for i in range(num_steps):
         state_i = jax.tree_util.tree_map(lambda x: x[i], states)
         states_list.append(state_i)
-    return env.render(
+    # Call render on the unwrapped Imitation env to access render_ghost kwarg
+    unwrapped = get_unwrapped_env(env)
+    return unwrapped.render(
         states_list, camera=camera, height=height, width=width, render_ghost=False
     )
 
