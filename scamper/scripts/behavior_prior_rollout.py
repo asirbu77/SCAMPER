@@ -19,6 +19,7 @@ import h5py
 import imageio
 import jax
 import jax.numpy as jnp
+import mujoco
 import numpy as np
 from jax import random
 from mujoco import mjx
@@ -170,24 +171,42 @@ def run_rollouts(env, policy_fn, starting_state, max_steps, rng_keys):
     return all_states
 
 
-def get_unwrapped_env(env):
-    """Unwrap to the underlying Imitation environment."""
-    while hasattr(env, "_env"):
-        env = env._env
-    return env
+def build_render_model(env):
+    """Build a MuJoCo model for rendering from the environment's spec (no ghost)."""
+    unwrapped = env
+    while hasattr(unwrapped, "_env"):
+        unwrapped = unwrapped._env
+    mj_model = unwrapped.mj_model
+    return mj_model
 
 
-def render_rollout(env, states, num_steps, camera, height=480, width=640):
-    """Render a single rollout to a list of frames."""
-    states_list = []
-    for i in range(num_steps):
-        state_i = jax.tree_util.tree_map(lambda x: x[i], states)
-        states_list.append(state_i)
-    # Call render on the unwrapped Imitation env to access render_ghost kwarg
-    unwrapped = get_unwrapped_env(env)
-    return unwrapped.render(
-        states_list, camera=camera, height=height, width=width, render_ghost=False
-    )
+def render_qpos_trajectory(qpos_array, mj_model, camera, height=480, width=640):
+    """Render frames directly from a qpos array using MuJoCo's C renderer.
+
+    Args:
+        qpos_array: numpy array of shape (num_steps, qpos_dim).
+        mj_model: compiled MuJoCo model.
+        camera: camera name string.
+        height: render height in pixels.
+        width: render width in pixels.
+
+    Returns:
+        List of rendered frames as numpy arrays.
+    """
+    mj_model.vis.global_.offwidth = width
+    mj_model.vis.global_.offheight = height
+    mj_data = mujoco.MjData(mj_model)
+    renderer = mujoco.Renderer(mj_model, height=height, width=width)
+
+    frames = []
+    for t in range(len(qpos_array)):
+        mj_data.qpos[:] = qpos_array[t]
+        mujoco.mj_forward(mj_model, mj_data)
+        renderer.update_scene(mj_data, camera=camera)
+        frames.append(renderer.render().copy())
+
+    renderer.close()
+    return frames
 
 
 def main():
@@ -216,6 +235,9 @@ def main():
     print(f"Proprioceptive obs size: {proprioceptive_obs_size}")
     print(f"Reference obs size: {reference_obs_size}")
     print(f"Number of reference clips: {reference_clips.qpos.shape[0]}")
+
+    # Build MuJoCo model for rendering from qpos
+    mj_model = build_render_model(env)
 
     # Run rollouts
     rng = random.PRNGKey(args.seed)
@@ -282,16 +304,11 @@ def main():
                 grp.attrs["num_rollouts"] = n
                 print(f"  Saved qpos to H5: {group_name} {qpos_np.shape}")
 
-                # Render each rollout
+                # Render each rollout directly from qpos
                 for ri in range(n):
-                    rollout_states = jax.tree_util.tree_map(
-                        lambda x: x[ri], all_states
-                    )
-
-                    frames = render_rollout(
-                        env,
-                        rollout_states,
-                        args.max_steps,
+                    frames = render_qpos_trajectory(
+                        qpos_np[ri],
+                        mj_model,
                         camera=args.camera_name,
                         height=args.render_height,
                         width=args.render_width,
