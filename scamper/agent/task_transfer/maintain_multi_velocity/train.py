@@ -3,9 +3,10 @@
 Trains a policy to maintain various target velocities (randomized per episode).
 The target velocity is included in the task observation.
 
-Three training modes:
+Four training modes:
 - decoder_only: Freeze decoder, train new encoder
-- prior_decoder: Freeze prior + decoder, train residual encoder
+- prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
+- distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
@@ -13,6 +14,7 @@ Supports Orbax checkpointing and SLURM preemption recovery.
 Usage:
     python -m scamper.agent.task_transfer.maintain_multi_velocity.train mode=decoder_only
     python -m scamper.agent.task_transfer.maintain_multi_velocity.train mode=prior_decoder
+    python -m scamper.agent.task_transfer.maintain_multi_velocity.train mode=distill
     python -m scamper.agent.task_transfer.maintain_multi_velocity.train mode=scratch
 """
 
@@ -149,7 +151,13 @@ def main(cfg: DictConfig) -> None:
     # Phase 2: Load frozen networks from mlp_prior checkpoint
     # ----------------------------------------------------------------
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
-    logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
+
+    if cfg.mode == "distill":
+        step_prefix = "DistillNetwork"
+        logging.info(f"Loading distill checkpoint from: {prior_checkpoint_path}")
+    else:
+        step_prefix = "PriorNetwork"
+        logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
 
     (
         encoder_params,
@@ -157,7 +165,9 @@ def main(cfg: DictConfig) -> None:
         decoder_params,
         normalizer_params,
         ckpt_cfg,
-    ) = load_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
+    ) = load_prior_checkpoint(
+        prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
+    )
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]
@@ -224,8 +234,8 @@ def main(cfg: DictConfig) -> None:
     logging.info(f"Y-bound termination: max_y={cfg.env.max_y}")
 
     # Set actuator type: scratch mode can optionally use PD actuators;
-    # decoder_only and prior_decoder always use torque (frozen decoder
-    # was trained with torque actuators).
+    # decoder_only, prior_decoder, and distill always use torque (frozen
+    # decoder was trained with torque actuators).
     if cfg.mode == "scratch":
         env_cfg.torque_actuators = cfg.scratch.get("torque_actuators", True)
         if not env_cfg.torque_actuators:
@@ -244,18 +254,19 @@ def main(cfg: DictConfig) -> None:
             )
         elif cfg.mode == "scratch":
             return FlatObsWrapper(base_env)
-        else:  # prior_decoder
+        else:  # prior_decoder or distill
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
+            mode_cfg = cfg.distill if cfg.mode == "distill" else cfg.prior_decoder
             return PriorDecoderHighLevelWrapper(
                 base_env,
                 prior_fn,
                 decoder_fn,
                 latent_size,
                 proprio_size,
-                deterministic_prior=cfg.prior_decoder.deterministic_prior,
-                noise_logvar=cfg.prior_decoder.noise_logvar,
+                deterministic_prior=mode_cfg.deterministic_prior,
+                noise_logvar=mode_cfg.noise_logvar,
             )
 
     env = make_wrapped_env(is_eval=False)
