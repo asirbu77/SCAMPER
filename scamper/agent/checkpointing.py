@@ -293,6 +293,7 @@ def make_ppo_network_from_cfg(cfg: DictConfig) -> Any:
         encoder_hidden_layer_sizes=tuple(network_config.encoder_layer_sizes),
         decoder_hidden_layer_sizes=tuple(network_config.decoder_layer_sizes),
         value_hidden_layer_sizes=tuple(network_config.critic_layer_sizes),
+        proprioception_noise_std=network_config.get("proprioception_noise_std", 0.0),
     )
 
 
@@ -399,6 +400,42 @@ def _get_run_state_file_path(cfg: DictConfig) -> Path:
     return base_path / f"run_state_{job_id}_{config_hash}.json"
 
 
+def _find_run_state_file(cfg: DictConfig) -> Path | None:
+    """Find a run state file for this config, tolerating SLURM job ID changes.
+
+    First tries an exact match on job ID + config hash (fast path for
+    preemption requeues where the job ID is preserved). Falls back to a
+    glob search by config hash so that manual resubmissions with a new
+    SLURM job ID can still discover the previous run state.
+
+    Args:
+        cfg: Configuration with logging_config.model_path.
+
+    Returns:
+        Path to the run state file, or None if not found.
+    """
+    exact_path = _get_run_state_file_path(cfg)
+    if exact_path.exists():
+        return exact_path
+
+    # Fallback: search by config hash alone (handles new SLURM job IDs)
+    config_hash = _hash_config(cfg)
+    base_path = Path(cfg.logging_config.model_path).resolve()
+    candidates = sorted(
+        base_path.glob(f"run_state_*_{config_hash}.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        logging.info(
+            f"No exact run state match; found {len(candidates)} candidate(s) "
+            f"by config hash, using most recent: {candidates[0].name}"
+        )
+        return candidates[0]
+
+    return None
+
+
 def atomic_write_json(file_path: Path, data: dict[str, Any]) -> None:
     """Atomically write JSON data to a file.
 
@@ -458,12 +495,15 @@ def discover_existing_run_state(
         Run state dict with "latest_checkpoint_step" added if valid,
         None if no valid run state found.
     """
-    state_file_path = _get_run_state_file_path(cfg)
-    logging.info(f"Looking for existing run state at: {state_file_path}")
+    state_file_path = _find_run_state_file(cfg)
+    if state_file_path is None:
+        logging.info("No existing run state found")
+        return None
+    logging.info(f"Found run state at: {state_file_path}")
 
     run_state = read_json_with_lock(state_file_path)
     if not run_state:
-        logging.info("No existing run state found")
+        logging.info("Run state file unreadable, ignoring")
         return None
 
     # Validate required keys
@@ -746,3 +786,13 @@ def load_from_run_state_distill(
     Uses DistillNetwork step prefix.
     """
     return _load_from_run_state_with_prefix(cfg, step_prefix="DistillNetwork")
+
+
+def load_from_run_state_distill_prior(
+    cfg: DictConfig,
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Load or create run state for distill prior (RGM) training.
+
+    Uses DistillPriorNetwork step prefix.
+    """
+    return _load_from_run_state_with_prefix(cfg, step_prefix="DistillPriorNetwork")

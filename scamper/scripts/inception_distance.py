@@ -308,7 +308,7 @@ def find_fallen_clip_indices(h5_path: str, real_dataset_name: str) -> np.ndarray
         1-D array of clip indices where skull z < 0.
     """
     import mujoco
-    from vnl_playground.tasks.rodent import imitation
+    from scamper.environment.rodent import imitation
 
     os.environ.setdefault("MUJOCO_GL", "egl")
     os.environ.setdefault("PYOPENGL_PLATFORM", "egl")

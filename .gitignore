@@ -11,6 +11,7 @@ scratch
 notebooks/plots/
 pdfs/
 notes/
+notebooks/analysis/FinalNotebooks/Plots
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

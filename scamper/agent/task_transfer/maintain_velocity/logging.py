@@ -68,6 +68,7 @@ def rollout_logging_fn(
         rollout.append(state)
 
     _log_reward_metrics(rollout, current_step)
+    _log_gate_metrics(rollout, current_step)
 
     # Render video on first eval and every render_every evals thereafter
     should_render = eval_count == 0 or eval_count % render_every == 0
@@ -131,6 +132,50 @@ def _log_reward_metrics(rollout: list[Any], current_step: int) -> None:
         logging.warning(f"Failed to log reward metrics: {e}")
 
 
+def _log_gate_metrics(rollout: list[Any], current_step: int) -> None:
+    """Log per-step gate metrics as line plots.
+
+    Creates plots showing gate value and gate logit over the episode,
+    useful for visualizing how quickly the gate switches between
+    RGM and policy+prior during evaluation.
+
+    Args:
+        rollout: List of environment states from the episode.
+        current_step: Current training step for versioning.
+    """
+    if not rollout or not hasattr(rollout[0], "metrics"):
+        return
+
+    first_metrics = rollout[0].metrics
+    gate_keys = sorted([k for k in first_metrics.keys() if k.startswith("gate")])
+
+    if not gate_keys:
+        return
+
+    columns = ["frame"] + gate_keys
+    data = []
+    for i, state in enumerate(rollout):
+        row = [i] + [float(state.metrics.get(k, 0.0)) for k in gate_keys]
+        data.append(row)
+
+    try:
+        table = wandb.Table(data=data, columns=columns)
+        for metric_name in gate_keys:
+            wandb.log(
+                {
+                    f"eval/{metric_name}_curve": wandb.plot.line(
+                        table,
+                        "frame",
+                        metric_name,
+                        title=f"{metric_name} (step {current_step})",
+                    )
+                },
+                commit=False,
+            )
+    except Exception as e:
+        logging.warning(f"Failed to log gate metrics: {e}")
+
+
 def _log_rollout_video(
     env: Any,
     model_path: str,
@@ -189,6 +234,7 @@ def wandb_progress(num_steps: int, metrics: dict[str, Any]) -> None:
 
 def make_wandb_progress_with_offset(
     step_offset: int = 0,
+    episode_length: int | None = None,
 ) -> Callable[[int, dict[str, Any]], None]:
     """Create a wandb progress function with step offset for resume support.
 
@@ -196,8 +242,14 @@ def make_wandb_progress_with_offset(
     from 0. This wrapper adds the offset so W&B shows correct cumulative
     step counts.
 
+    Brax's EpisodeWrapper sums state.metrics across timesteps. If
+    ``episode_length`` is provided, any metric whose key starts with
+    ``_gate`` (e.g. ``episode_gate``) is divided by the episode length
+    so the logged value reflects the per-step average (0-1 range).
+
     Args:
         step_offset: Number of timesteps completed in previous runs.
+        episode_length: Episode length for normalizing accumulated metrics.
 
     Returns:
         Progress function compatible with Brax's ``progress_fn`` callback.
@@ -209,6 +261,13 @@ def make_wandb_progress_with_offset(
             return
         adjusted_step = num_steps + step_offset
         metrics["num_steps"] = adjusted_step
+
+        # Normalize accumulated per-step metrics to per-step averages
+        if episode_length is not None:
+            for key in list(metrics.keys()):
+                if "_gate" in key:
+                    metrics[key] = metrics[key] / episode_length
+
         wandb.log(metrics)
 
     return progress_fn

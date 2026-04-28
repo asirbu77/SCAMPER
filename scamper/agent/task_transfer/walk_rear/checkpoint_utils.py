@@ -35,24 +35,27 @@ _STEP_PREFIX = "TaskTransfer"
 def load_prior_checkpoint(
     checkpoint_path: str,
     step: int | None = None,
+    step_prefix: str = "PriorNetwork",
 ) -> Tuple[Dict, Dict, Dict, DictRunningStatisticsState, Dict]:
-    """Load encoder, prior, and decoder parameters from an mlp_prior checkpoint.
+    """Load encoder, prior, and decoder parameters from an mlp_prior or distill checkpoint.
 
-    mlp_prior checkpoints have structure:
+    Both checkpoint types share the same structure:
     (normalizer_params, {"params": {"encoder": ..., "decoder": ..., "prior": ...}})
 
     Only supports dict normalizer format.
 
     Args:
-        checkpoint_path: Path to the mlp_prior checkpoint directory.
+        checkpoint_path: Path to the checkpoint directory.
         step: Specific step to load. If None, loads the latest.
+        step_prefix: Orbax step prefix. "PriorNetwork" for mlp_prior,
+            "DistillNetwork" for distill checkpoints.
 
     Returns:
         Tuple of (encoder_params, prior_params, decoder_params,
                   normalizer_params, config_dict).
         normalizer_params is DictRunningStatisticsState.
     """
-    mgr_options = ocp.CheckpointManagerOptions(create=False, step_prefix="PriorNetwork")
+    mgr_options = ocp.CheckpointManagerOptions(create=False, step_prefix=step_prefix)
 
     with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as ckpt_mgr:
         if step is None:
@@ -74,7 +77,8 @@ def load_prior_checkpoint(
 
     abstract_policy = _create_abstract_prior_policy(cfg)
 
-    with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as ckpt_mgr:
+    mgr_options2 = ocp.CheckpointManagerOptions(create=False, step_prefix=step_prefix)
+    with ocp.CheckpointManager(checkpoint_path, options=mgr_options2) as ckpt_mgr:
         policy_params = ckpt_mgr.restore(
             step,
             args=ocp.args.Composite(policy=ocp.args.StandardRestore(abstract_policy)),
@@ -321,6 +325,8 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
         hashable["prior_decoder"] = OmegaConf.to_container(
             cfg.prior_decoder, resolve=True
         )
+    elif cfg.mode == "distill":
+        hashable["distill"] = OmegaConf.to_container(cfg.distill, resolve=True)
     cfg_str = json.dumps(hashable, sort_keys=True, default=str)
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]
 
@@ -342,10 +348,12 @@ def get_run_state_file_path(cfg: DictConfig, model_path_base: str) -> Path:
 
 
 def _find_run_state_file(cfg: DictConfig, model_path_base: str) -> Path | None:
-    """Find a run state file for this config using the current job identifier.
+    """Find a run state file for this config, tolerating SLURM job ID changes.
 
-    SLURM preemption requeues jobs with the same job ID, so an exact match
-    on job identifier + config hash is sufficient for preemption recovery.
+    First tries an exact match on job ID + config hash (fast path for
+    preemption requeues where the job ID is preserved). Falls back to a
+    glob search by config hash so that manual resubmissions with a new
+    SLURM job ID can still discover the previous run state.
 
     Args:
         cfg: Task transfer config.
@@ -357,6 +365,21 @@ def _find_run_state_file(cfg: DictConfig, model_path_base: str) -> Path | None:
     exact_path = get_run_state_file_path(cfg, model_path_base)
     if exact_path.exists():
         return exact_path
+
+    # Fallback: search by config hash alone (handles new SLURM job IDs)
+    config_hash = hash_task_transfer_config(cfg)
+    base_path = Path(model_path_base).resolve()
+    candidates = sorted(
+        base_path.glob(f"run_state_*_{config_hash}.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        logging.info(
+            f"No exact run state match; found {len(candidates)} candidate(s) "
+            f"by config hash, using most recent: {candidates[0].name}"
+        )
+        return candidates[0]
 
     return None
 

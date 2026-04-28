@@ -3,10 +3,11 @@
 Trains a policy to maintain various target velocities (randomized per episode).
 The target velocity is included in the task observation.
 
-Three training modes:
+Four training modes:
 1. decoder_only: Freeze decoder, train new encoder
-2. prior_decoder: Freeze prior + decoder, train residual encoder
-3. scratch: Train both policy and decoder from random initialization
+2. prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
+3. distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
+4. scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
 

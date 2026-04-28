@@ -1,8 +1,12 @@
 """Arena forage task transfer training with Brax PPO.
 
-Three training modes:
+Seven training modes:
 - decoder_only: Freeze decoder, train new encoder
-- prior_decoder: Freeze prior + decoder, train residual encoder
+- prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
+- distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
+- distill_prior: Freeze prior + rgm + decoder, train residual + gate (from distill_prior checkpoint)
+- distill_prior_no_rgm: Freeze prior + decoder, train residual (from distill_prior checkpoint, ignores rgm/gate)
+- rgm_only: Freeze rgm + decoder, train residual added to rgm mean (from distill_prior checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
@@ -10,6 +14,10 @@ Supports Orbax checkpointing and SLURM preemption recovery.
 Usage:
     python -m scamper.agent.task_transfer.arena_forage.train mode=decoder_only
     python -m scamper.agent.task_transfer.arena_forage.train mode=prior_decoder
+    python -m scamper.agent.task_transfer.arena_forage.train mode=distill
+    python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior
+    python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior_no_rgm
+    python -m scamper.agent.task_transfer.arena_forage.train mode=rgm_only
     python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 """
 
@@ -47,13 +55,15 @@ from brax.training.acme import running_statistics, specs
 from mujoco_playground import wrapper
 from omegaconf import DictConfig, OmegaConf
 
-from vnl_playground.tasks.rodent import consts as rodent_consts
-from vnl_playground.tasks.rodent import arena_forage
+from scamper.environment.rodent import consts as rodent_consts
+from scamper.environment.rodent import arena_forage
 
 from scamper.agent.task_transfer.arena_forage.checkpoint_utils import (
     load_prior_checkpoint,
+    load_distill_prior_checkpoint,
     make_decoder_inference_fn,
     make_prior_inference_fn,
+    make_rgm_inference_fn,
     # Checkpointing / run state
     discover_existing_run_state,
     save_run_state,
@@ -71,13 +81,18 @@ from scamper.agent.task_transfer.arena_forage.wrappers import (
     DecoderHighLevelWrapper,
     FlatObsWrapper,
     PriorDecoderHighLevelWrapper,
+    PriorRGMDecoderHighLevelWrapper,
+    RGMDecoderHighLevelWrapper,
 )
 from scamper.agent.task_transfer.arena_forage.scratch_networks import (
     make_scratch_ppo_networks,
 )
 
 # Enable persistent compilation cache
-jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+jax.config.update(
+    "jax_compilation_cache_dir",
+    os.environ.get("JAX_COMPILATION_CACHE_DIR", "/tmp/jax_cache"),
+)
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
@@ -146,18 +161,44 @@ def main(cfg: DictConfig) -> None:
     logging.info(f"Model checkpoint path: {model_path}")
 
     # ----------------------------------------------------------------
-    # Phase 2: Load frozen networks from mlp_prior checkpoint
+    # Phase 2: Load frozen networks from checkpoint
     # ----------------------------------------------------------------
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
-    logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
 
-    (
-        encoder_params,
-        prior_params,
-        decoder_params,
-        normalizer_params,
-        ckpt_cfg,
-    ) = load_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
+    if cfg.mode in ("distill_prior", "distill_prior_no_rgm", "rgm_only"):
+        logging.info(f"Loading distill_prior checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            rgm_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_distill_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
+    elif cfg.mode == "distill":
+        step_prefix = "DistillNetwork"
+        logging.info(f"Loading distill checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_prior_checkpoint(
+            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
+        )
+    else:
+        step_prefix = "PriorNetwork"
+        logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_prior_checkpoint(
+            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
+        )
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]
@@ -170,6 +211,8 @@ def main(cfg: DictConfig) -> None:
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
+    if cfg.mode in ("distill_prior", "distill_prior_no_rgm", "rgm_only"):
+        frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
     decoder_fn = make_decoder_inference_fn(decoder_params, normalizer_params, ckpt_cfg)
@@ -243,18 +286,56 @@ def main(cfg: DictConfig) -> None:
             )
         elif cfg.mode == "scratch":
             return FlatObsWrapper(base_env)
-        else:  # prior_decoder
+        elif cfg.mode == "distill_prior":
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
+            rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
+            mode_cfg = cfg.distill_prior
+            rgm_logvar = mode_cfg.get("rgm_logvar", None)
+            return PriorRGMDecoderHighLevelWrapper(
+                base_env,
+                prior_fn,
+                rgm_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
+                gate_bias=mode_cfg.gate_bias,
+                gate_margin=mode_cfg.get("gate_margin", 0.0),
+                rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=rgm_logvar,
+            )
+        elif cfg.mode == "rgm_only":
+            rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
+            mode_cfg = cfg.rgm_only
+            rgm_logvar = mode_cfg.get("rgm_logvar", None)
+            return RGMDecoderHighLevelWrapper(
+                base_env,
+                rgm_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
+                rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=rgm_logvar,
+            )
+        else:  # prior_decoder, distill, or distill_prior_no_rgm
+            prior_fn = make_prior_inference_fn(
+                prior_params, normalizer_params, ckpt_cfg
+            )
+            if cfg.mode == "distill":
+                mode_cfg = cfg.distill
+            elif cfg.mode == "distill_prior_no_rgm":
+                mode_cfg = cfg.distill_prior_no_rgm
+            else:
+                mode_cfg = cfg.prior_decoder
             return PriorDecoderHighLevelWrapper(
                 base_env,
                 prior_fn,
                 decoder_fn,
                 latent_size,
                 proprio_size,
-                deterministic_prior=cfg.prior_decoder.deterministic_prior,
-                noise_logvar=cfg.prior_decoder.noise_logvar,
+                deterministic_prior=mode_cfg.deterministic_prior,
+                noise_logvar=mode_cfg.noise_logvar,
             )
 
     env = make_wrapped_env(is_eval=False)
@@ -534,7 +615,9 @@ def main(cfg: DictConfig) -> None:
     }
 
     num_evals = max(int(remaining_timesteps / cfg.train.eval_every), 1)
-    progress_fn = make_wandb_progress_with_offset(step_offset)
+    progress_fn = make_wandb_progress_with_offset(
+        step_offset, episode_length=cfg.train.episode_length
+    )
 
     train_fn = functools.partial(
         brax_ppo.train,

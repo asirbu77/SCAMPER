@@ -16,7 +16,7 @@ import orbax.checkpoint as ocp
 import wandb
 from mujoco_playground import wrapper as playground_wrappers
 from omegaconf import DictConfig
-from vnl_playground import registry
+from scamper.environment import registry
 
 from scamper.config import utils
 from scamper.agent import checkpointing, wandb_logging
@@ -116,6 +116,9 @@ def main(cfg: DictConfig) -> None:
         encoder_hidden_layer_sizes=tuple(cfg.network_config.encoder_layer_sizes),
         decoder_hidden_layer_sizes=tuple(cfg.network_config.decoder_layer_sizes),
         value_hidden_layer_sizes=tuple(cfg.network_config.critic_layer_sizes),
+        proprioception_noise_std=cfg.network_config.get(
+            "proprioception_noise_std", 0.0
+        ),
     )
 
     # Determine wandb run ID for resuming

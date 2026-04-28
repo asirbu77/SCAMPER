@@ -12,7 +12,7 @@ from mujoco_playground._src import mjx_env
 from jax import numpy as jnp
 from ml_collections import config_dict
 from omegaconf import DictConfig, OmegaConf
-from vnl_playground.tasks.rodent import imitation
+from scamper.environment.rodent import imitation
 
 
 def create_environment(cfg_dict: dict[str, Any] | DictConfig) -> mjx_env.MjxEnv:

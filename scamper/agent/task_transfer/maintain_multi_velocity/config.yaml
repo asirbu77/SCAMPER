@@ -4,20 +4,22 @@
 # Each episode samples a random target from U(min_velocity, max_velocity).
 # The target velocity is included in the task observation.
 #
-# Three training modes:
+# Four training modes:
 #   decoder_only: Freeze decoder, train new encoder
-#   prior_decoder: Freeze prior + decoder, train residual encoder
+#   prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
+#   distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
 # Usage:
 #   python -m scamper.agent.task_transfer.maintain_multi_velocity.train mode=decoder_only
 #   python -m scamper.agent.task_transfer.maintain_multi_velocity.train mode=prior_decoder
+#   python -m scamper.agent.task_transfer.maintain_multi_velocity.train mode=distill
 #   python -m scamper.agent.task_transfer.maintain_multi_velocity.train mode=scratch
 
 defaults:
   - _self_
 
-# Training mode: "decoder_only", "prior_decoder", or "scratch"
+# Training mode: "decoder_only", "prior_decoder", "distill", or "scratch"
 mode: "decoder_only"
 
 # Checkpoint to load (mlp_prior checkpoint)
@@ -30,6 +32,10 @@ decoder_only:
   _placeholder: true
 
 prior_decoder:
+  deterministic_prior: true
+  noise_logvar: -2.0
+
+distill:
   deterministic_prior: true
   noise_logvar: -2.0
 
