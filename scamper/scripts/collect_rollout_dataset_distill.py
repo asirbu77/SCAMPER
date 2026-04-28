@@ -614,7 +614,9 @@ def _setup_environment(args, cfg):
     # Apply CLI overrides to checkpoint config before environment creation
     OmegaConf.set_struct(cfg.env_config, False)
     if args.mujoco_impl is not None:
-        print(f"  Overriding mujoco_impl: {cfg.env_config.mujoco_impl} -> {args.mujoco_impl}")
+        print(
+            f"  Overriding mujoco_impl: {cfg.env_config.mujoco_impl} -> {args.mujoco_impl}"
+        )
         OmegaConf.update(cfg.env_config, "mujoco_impl", args.mujoco_impl)
     if args.xml_variant is not None:
         from scamper.environment.rodent import consts as rodent_consts
@@ -625,13 +627,19 @@ def _setup_environment(args, cfg):
             "no-tail-collisions": str(rodent_consts.RODENT_NO_TAIL_COLLISION_XML),
         }
         new_xml_path = xml_map[args.xml_variant]
-        print(f"  Overriding walker_xml_path: {cfg.env_config.get('walker_xml_path', 'N/A')} -> {new_xml_path}")
+        print(
+            f"  Overriding walker_xml_path: {cfg.env_config.get('walker_xml_path', 'N/A')} -> {new_xml_path}"
+        )
         OmegaConf.update(cfg.env_config, "walker_xml_path", new_xml_path)
     if args.naconmax is not None:
-        print(f"  Overriding naconmax: {cfg.env_config.get('naconmax', 'N/A')} -> {args.naconmax}")
+        print(
+            f"  Overriding naconmax: {cfg.env_config.get('naconmax', 'N/A')} -> {args.naconmax}"
+        )
         OmegaConf.update(cfg.env_config, "naconmax", args.naconmax)
     if args.njmax is not None:
-        print(f"  Overriding njmax: {cfg.env_config.get('njmax', 'N/A')} -> {args.njmax}")
+        print(
+            f"  Overriding njmax: {cfg.env_config.get('njmax', 'N/A')} -> {args.njmax}"
+        )
         OmegaConf.update(cfg.env_config, "njmax", args.njmax)
     OmegaConf.set_struct(cfg.env_config, True)
 
@@ -676,9 +684,21 @@ def _setup_environment(args, cfg):
 
 
 def _collect_and_log(
-    name, env, reference_clips, policy_fn, num_clips, num_steps,
-    batch_size, proprioceptive_obs_size, reference_obs_size, intention_size,
-    is_prior_policy, rng_key, desc, results, latents_results,
+    name,
+    env,
+    reference_clips,
+    policy_fn,
+    num_clips,
+    num_steps,
+    batch_size,
+    proprioceptive_obs_size,
+    reference_obs_size,
+    intention_size,
+    is_prior_policy,
+    rng_key,
+    desc,
+    results,
+    latents_results,
 ):
     """Collect rollouts for a single policy and store in results dicts."""
     t_start = time.time()
@@ -713,8 +733,14 @@ def main_distill(args):
     )
 
     (
-        cfg, env, reference_clips, num_clips, num_steps,
-        reference_obs_size, proprioceptive_obs_size, intention_size,
+        cfg,
+        env,
+        reference_clips,
+        num_clips,
+        num_steps,
+        reference_obs_size,
+        proprioceptive_obs_size,
+        intention_size,
     ) = _setup_environment(args, cfg)
 
     obs_sizes = dict(cfg.network_config.obs_sizes)
@@ -740,11 +766,21 @@ def main_distill(args):
     )
     rng, key = jax.random.split(rng)
     _collect_and_log(
-        "teacher", env, reference_clips, teacher_policy,
-        num_clips, num_steps, args.batch_size,
-        proprioceptive_obs_size, reference_obs_size, intention_size,
-        is_prior_policy=False, rng_key=key, desc="Teacher",
-        results=results, latents_results=latents_results,
+        "teacher",
+        env,
+        reference_clips,
+        teacher_policy,
+        num_clips,
+        num_steps,
+        args.batch_size,
+        proprioceptive_obs_size,
+        reference_obs_size,
+        intention_size,
+        is_prior_policy=False,
+        rng_key=key,
+        desc="Teacher",
+        results=results,
+        latents_results=latents_results,
     )
 
     # 3. Student encoder-decoder rollouts
@@ -754,11 +790,21 @@ def main_distill(args):
     student_enc_dec_policy = create_student_encoder_decoder_policy(train_state, cfg)
     rng, key = jax.random.split(rng)
     _collect_and_log(
-        "student_encoder_decoder", env, reference_clips, student_enc_dec_policy,
-        num_clips, num_steps, args.batch_size,
-        proprioceptive_obs_size, reference_obs_size, intention_size,
-        is_prior_policy=False, rng_key=key, desc="Student encoder-decoder",
-        results=results, latents_results=latents_results,
+        "student_encoder_decoder",
+        env,
+        reference_clips,
+        student_enc_dec_policy,
+        num_clips,
+        num_steps,
+        args.batch_size,
+        proprioceptive_obs_size,
+        reference_obs_size,
+        intention_size,
+        is_prior_policy=False,
+        rng_key=key,
+        desc="Student encoder-decoder",
+        results=results,
+        latents_results=latents_results,
     )
 
     # 4. Prior rollouts deterministic
@@ -770,11 +816,21 @@ def main_distill(args):
     )
     rng, key = jax.random.split(rng)
     _collect_and_log(
-        "prior_deterministic", env, reference_clips, prior_policy_det,
-        num_clips, num_steps, args.batch_size,
-        proprioceptive_obs_size, reference_obs_size, intention_size,
-        is_prior_policy=True, rng_key=key, desc="Prior (deterministic)",
-        results=results, latents_results=latents_results,
+        "prior_deterministic",
+        env,
+        reference_clips,
+        prior_policy_det,
+        num_clips,
+        num_steps,
+        args.batch_size,
+        proprioceptive_obs_size,
+        reference_obs_size,
+        intention_size,
+        is_prior_policy=True,
+        rng_key=key,
+        desc="Prior (deterministic)",
+        results=results,
+        latents_results=latents_results,
     )
 
     # 5. Prior rollouts with predicted logvar
@@ -786,11 +842,21 @@ def main_distill(args):
     )
     rng, key = jax.random.split(rng)
     _collect_and_log(
-        "prior_predicted_logvar", env, reference_clips, prior_policy_predicted,
-        num_clips, num_steps, args.batch_size,
-        proprioceptive_obs_size, reference_obs_size, intention_size,
-        is_prior_policy=True, rng_key=key, desc="Prior (predicted logvar)",
-        results=results, latents_results=latents_results,
+        "prior_predicted_logvar",
+        env,
+        reference_clips,
+        prior_policy_predicted,
+        num_clips,
+        num_steps,
+        args.batch_size,
+        proprioceptive_obs_size,
+        reference_obs_size,
+        intention_size,
+        is_prior_policy=True,
+        rng_key=key,
+        desc="Prior (predicted logvar)",
+        results=results,
+        latents_results=latents_results,
     )
 
     # 6. Prior rollouts with specified fixed logvar values
@@ -809,11 +875,21 @@ def main_distill(args):
             else f"prior_logvar_{logvar}"
         )
         _collect_and_log(
-            key_name, env, reference_clips, prior_policy,
-            num_clips, num_steps, args.batch_size,
-            proprioceptive_obs_size, reference_obs_size, intention_size,
-            is_prior_policy=True, rng_key=key, desc=f"Prior (logvar={logvar})",
-            results=results, latents_results=latents_results,
+            key_name,
+            env,
+            reference_clips,
+            prior_policy,
+            num_clips,
+            num_steps,
+            args.batch_size,
+            proprioceptive_obs_size,
+            reference_obs_size,
+            intention_size,
+            is_prior_policy=True,
+            rng_key=key,
+            desc=f"Prior (logvar={logvar})",
+            results=results,
+            latents_results=latents_results,
         )
 
     return original_qpos, results, latents_results
@@ -831,8 +907,14 @@ def main_distill_prior(args):
     )
 
     (
-        cfg, env, reference_clips, num_clips, num_steps,
-        reference_obs_size, proprioceptive_obs_size, intention_size,
+        cfg,
+        env,
+        reference_clips,
+        num_clips,
+        num_steps,
+        reference_obs_size,
+        proprioceptive_obs_size,
+        intention_size,
     ) = _setup_environment(args, cfg)
 
     rng = jax.random.PRNGKey(args.seed)
@@ -853,11 +935,21 @@ def main_distill_prior(args):
     enc_dec_policy = create_distill_prior_encoder_decoder_policy(policy_params, cfg)
     rng, key = jax.random.split(rng)
     _collect_and_log(
-        "student_encoder_decoder", env, reference_clips, enc_dec_policy,
-        num_clips, num_steps, args.batch_size,
-        proprioceptive_obs_size, reference_obs_size, intention_size,
-        is_prior_policy=False, rng_key=key, desc="Encoder-decoder",
-        results=results, latents_results=latents_results,
+        "student_encoder_decoder",
+        env,
+        reference_clips,
+        enc_dec_policy,
+        num_clips,
+        num_steps,
+        args.batch_size,
+        proprioceptive_obs_size,
+        reference_obs_size,
+        intention_size,
+        is_prior_policy=False,
+        rng_key=key,
+        desc="Encoder-decoder",
+        results=results,
+        latents_results=latents_results,
     )
 
     # 3. RGM rollouts deterministic
@@ -869,11 +961,21 @@ def main_distill_prior(args):
     )
     rng, key = jax.random.split(rng)
     _collect_and_log(
-        "rgm_deterministic", env, reference_clips, rgm_policy_det,
-        num_clips, num_steps, args.batch_size,
-        proprioceptive_obs_size, reference_obs_size, intention_size,
-        is_prior_policy=True, rng_key=key, desc="RGM (deterministic)",
-        results=results, latents_results=latents_results,
+        "rgm_deterministic",
+        env,
+        reference_clips,
+        rgm_policy_det,
+        num_clips,
+        num_steps,
+        args.batch_size,
+        proprioceptive_obs_size,
+        reference_obs_size,
+        intention_size,
+        is_prior_policy=True,
+        rng_key=key,
+        desc="RGM (deterministic)",
+        results=results,
+        latents_results=latents_results,
     )
 
     # 4. RGM rollouts with predicted logvar
@@ -885,11 +987,21 @@ def main_distill_prior(args):
     )
     rng, key = jax.random.split(rng)
     _collect_and_log(
-        "rgm_predicted_logvar", env, reference_clips, rgm_policy_predicted,
-        num_clips, num_steps, args.batch_size,
-        proprioceptive_obs_size, reference_obs_size, intention_size,
-        is_prior_policy=True, rng_key=key, desc="RGM (predicted logvar)",
-        results=results, latents_results=latents_results,
+        "rgm_predicted_logvar",
+        env,
+        reference_clips,
+        rgm_policy_predicted,
+        num_clips,
+        num_steps,
+        args.batch_size,
+        proprioceptive_obs_size,
+        reference_obs_size,
+        intention_size,
+        is_prior_policy=True,
+        rng_key=key,
+        desc="RGM (predicted logvar)",
+        results=results,
+        latents_results=latents_results,
     )
 
     # 5. RGM rollouts with specified fixed logvar values
@@ -908,11 +1020,21 @@ def main_distill_prior(args):
             else f"rgm_logvar_{logvar}"
         )
         _collect_and_log(
-            key_name, env, reference_clips, rgm_policy,
-            num_clips, num_steps, args.batch_size,
-            proprioceptive_obs_size, reference_obs_size, intention_size,
-            is_prior_policy=True, rng_key=key, desc=f"RGM (logvar={logvar})",
-            results=results, latents_results=latents_results,
+            key_name,
+            env,
+            reference_clips,
+            rgm_policy,
+            num_clips,
+            num_steps,
+            args.batch_size,
+            proprioceptive_obs_size,
+            reference_obs_size,
+            intention_size,
+            is_prior_policy=True,
+            rng_key=key,
+            desc=f"RGM (logvar={logvar})",
+            results=results,
+            latents_results=latents_results,
         )
 
     return original_qpos, results, latents_results

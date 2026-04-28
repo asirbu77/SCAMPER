@@ -81,9 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--render-fps", type=int, default=50)
-    parser.add_argument(
-        "--camera-name", type=str, default="close_profile-rodent"
-    )
+    parser.add_argument("--camera-name", type=str, default="close_profile-rodent")
     parser.add_argument("--render-height", type=int, default=720)
     parser.add_argument("--render-width", type=int, default=1280)
     return parser.parse_args()
@@ -227,8 +225,8 @@ def main():
     cfg = fix_config_paths(cfg)
     env, reference_clips = create_environment(cfg)
 
-    reference_obs_size, proprioceptive_obs_size, total_obs_size = (
-        get_observation_sizes(cfg)
+    reference_obs_size, proprioceptive_obs_size, total_obs_size = get_observation_sizes(
+        cfg
     )
     print(f"Action size: {cfg.network_config.action_size}")
     print(f"Intention size: {cfg.network_config.intention_size}")
@@ -276,9 +274,7 @@ def main():
                 print(f"{'='*60}")
 
                 rng, rng_init, rng_rollout = random.split(rng, 3)
-                starting_state = create_clip_state(
-                    env, clip_idx, start_frame, rng_init
-                )
+                starting_state = create_clip_state(env, clip_idx, start_frame, rng_init)
 
                 # 1 for deterministic since they're identical
                 n = 1 if noise_level == "deterministic" else args.num_rollouts

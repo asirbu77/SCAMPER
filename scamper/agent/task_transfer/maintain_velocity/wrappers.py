@@ -593,9 +593,9 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
                 rgm_std = jp.exp(0.5 * self._rgm_logvar)
             else:
                 rgm_std = jp.exp(0.5 * rgm_logvar)
-            rgm_z = rgm_mean + jax.random.normal(
-                noise_rng, shape=rgm_mean.shape
-            ) * rgm_std
+            rgm_z = (
+                rgm_mean + jax.random.normal(noise_rng, shape=rgm_mean.shape) * rgm_std
+            )
         else:
             rgm_z = rgm_mean
 
