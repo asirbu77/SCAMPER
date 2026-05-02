@@ -735,6 +735,88 @@ def load_task_transfer_metadata(
     }
 
 
+def load_task_transfer_frozen_networks(
+    checkpoint_path: str,
+    network_config: Dict[str, Any],
+    step: int | None = None,
+) -> Tuple[Dict, Dict, Dict, DictRunningStatisticsState]:
+    """Load frozen networks bundled inside a TaskTransfer checkpoint.
+
+    ``save_task_transfer_checkpoint`` stores ``frozen_networks`` (encoder, prior,
+    decoder, imitation normalizer) alongside the PPO ``brax_params``, so the
+    checkpoint is self-contained and a separate prior/distill checkpoint is not
+    required to reconstruct the high-level wrappers used at evaluation time.
+
+    Args:
+        checkpoint_path: Path to the TaskTransfer checkpoint directory.
+        network_config: ``checkpoint_config.network_config`` from the saved
+            TaskTransfer config (used to build the abstract pytree).
+        step: Specific step to load. None = latest.
+
+    Returns:
+        Tuple of (encoder_params, prior_params, decoder_params,
+        imitation_normalizer).
+    """
+    latent_size = network_config["intention_size"]
+    action_size = network_config["action_size"]
+    obs_sizes = dict(network_config["obs_sizes"])
+    reference_obs_size = obs_sizes["imitation_target"]
+    proprioceptive_obs_size = obs_sizes["proprioception"]
+    encoder_hidden_layer_sizes = tuple(network_config["encoder_layer_sizes"])
+    decoder_hidden_layer_sizes = tuple(network_config["decoder_layer_sizes"])
+    prior_hidden_layer_sizes = tuple(
+        network_config.get("prior_layer_sizes", [1024, 1024])
+    )
+
+    combined_params = _init_network_params(
+        latent_size,
+        action_size,
+        reference_obs_size,
+        proprioceptive_obs_size,
+        encoder_hidden_layer_sizes,
+        decoder_hidden_layer_sizes,
+        prior_hidden_layer_sizes,
+    )
+
+    abstract_normalizer = DictRunningStatisticsState(
+        imitation_target=running_statistics.init_state(
+            specs.Array(reference_obs_size, jnp.dtype("float32"))
+        ),
+        proprioception=running_statistics.init_state(
+            specs.Array(proprioceptive_obs_size, jnp.dtype("float32"))
+        ),
+    )
+
+    abstract_frozen = {
+        "encoder_params": combined_params["params"]["encoder"],
+        "prior_params": combined_params["params"]["prior"],
+        "decoder_params": combined_params["params"]["decoder"],
+        "imitation_normalizer": abstract_normalizer,
+    }
+
+    # Orbax's OCDBT backend requires an absolute path.
+    checkpoint_path = str(Path(checkpoint_path).resolve())
+    mgr_options = ocp.CheckpointManagerOptions(create=False, step_prefix=_STEP_PREFIX)
+    with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as mgr:
+        if step is None:
+            step = mgr.latest_step()
+
+        data = mgr.restore(
+            step,
+            args=ocp.args.Composite(
+                frozen_networks=ocp.args.StandardRestore(abstract_frozen),
+            ),
+        )
+
+    fn = data["frozen_networks"]
+    return (
+        fn["encoder_params"],
+        fn["prior_params"],
+        fn["decoder_params"],
+        fn["imitation_normalizer"],
+    )
+
+
 def load_task_transfer_brax_params(
     checkpoint_path: str,
     abstract_brax_params: Any,
@@ -751,6 +833,8 @@ def load_task_transfer_brax_params(
     Returns:
         Tuple of (normalizer_params, policy_params, value_params).
     """
+    # Orbax's OCDBT backend requires an absolute path.
+    checkpoint_path = str(Path(checkpoint_path).resolve())
     mgr_options = ocp.CheckpointManagerOptions(create=False, step_prefix=_STEP_PREFIX)
     with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as mgr:
         if step is None:
