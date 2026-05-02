@@ -1,4 +1,4 @@
-"""PPO loss functions for MLP-based imitation learning.
+"""PPO loss functions for the expert (MLP-policy) trainer.
 
 Simplified PPO losses without VAE-specific components (no KL divergence,
 no AR(1) temporal smoothness). Includes:

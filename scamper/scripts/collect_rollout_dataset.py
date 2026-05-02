@@ -52,7 +52,7 @@ from scamper.agent.distill_prior.distill_prior_networks import (
     create_abstract_distill_prior_policy,
     make_distill_encoder_decoder_inference_fn,
 )
-from scamper.agent.imitation_mlp.mlp_network import MLPPolicy
+from scamper.agent.expert.mlp_network import MLPPolicy
 from scamper.agent.mlp_prior.prior_rollout_eval import create_prior_policy
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
@@ -167,7 +167,7 @@ def load_teacher_config(teacher_checkpoint_path: str) -> Any:
     """Load teacher config from its original checkpoint.
 
     Args:
-        teacher_checkpoint_path: Path to the imitation_mlp teacher checkpoint.
+        teacher_checkpoint_path: Path to the expert teacher checkpoint.
 
     Returns:
         OmegaConf config from the teacher checkpoint.

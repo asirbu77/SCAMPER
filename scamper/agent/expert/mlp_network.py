@@ -1,4 +1,4 @@
-"""MLP policy network for imitation learning without latent bottleneck.
+"""MLP policy network for the expert trainer (no latent bottleneck).
 
 Provides a simple MLP that takes concatenated observations (imitation_target +
 proprioception) and directly outputs action distribution parameters. No encoder,

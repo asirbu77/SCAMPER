@@ -1,4 +1,4 @@
-"""Entry point for scamper MLP imitation training."""
+"""Entry point for SCAMPER expert (MLP-policy) PPO training."""
 
 import os
 
@@ -21,9 +21,9 @@ from scamper.environment import registry
 
 from scamper.config import utils
 from scamper.agent import checkpointing, wandb_logging
-from scamper.agent.imitation_mlp import (
-    ppo as imitation_mlp_ppo,
-    ppo_networks as imitation_mlp_networks,
+from scamper.agent.expert import (
+    ppo as expert_ppo,
+    ppo_networks as expert_networks,
 )
 from scamper.agent.domain_randomization import domain_randomization_maker
 
@@ -52,7 +52,7 @@ def mlp_rollout_logging_fn(
     """Log evaluation rollout metrics and video to W&B (no latent logging).
 
     Simplified version of wandb_logging.rollout_logging_fn that skips
-    latent space statistics since the MLP policy has no latent bottleneck.
+    latent space statistics since the expert MLP policy has no latent bottleneck.
     """
     _, reset_rng, act_rng = jax.random.split(policy_params_fn_key, 3)
     state = jit_reset(reset_rng)
@@ -77,11 +77,9 @@ def mlp_rollout_logging_fn(
         wandb_logging._log_rollout_video(env, cfg, model_path, current_step, rollout)
 
 
-@hydra.main(
-    version_base=None, config_path="config", config_name="rodent-imitation-mlp-jax"
-)
+@hydra.main(version_base=None, config_path="config", config_name="rodent-expert-jax")
 def main(cfg: DictConfig) -> None:
-    """Main training entry point for MLP imitation learning."""
+    """Main training entry point for expert (MLP-policy) PPO training."""
     _setup_environment()
 
     try:
@@ -137,7 +135,7 @@ def main(cfg: DictConfig) -> None:
     logging.info("Using PPO Pipeline with MLP network")
 
     network_factory = functools.partial(
-        imitation_mlp_networks.make_mlp_ppo_networks,
+        expert_networks.make_mlp_ppo_networks,
         mlp_hidden_layer_sizes=tuple(cfg.network_config.mlp_layer_sizes),
         value_hidden_layer_sizes=tuple(cfg.network_config.critic_layer_sizes),
     )
@@ -194,7 +192,7 @@ def main(cfg: DictConfig) -> None:
         ),
     )
 
-    train_fn = functools.partial(imitation_mlp_ppo.train, **train_kwargs)
+    train_fn = functools.partial(expert_ppo.train, **train_kwargs)
 
     # Set the render env start frame to always be 0
     rollout_cfg = env_cfg_ml.copy_and_resolve_references()

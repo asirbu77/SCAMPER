@@ -1,7 +1,8 @@
-"""Load and query a frozen imitation_mlp teacher for DAgger distillation.
+"""Load and query a frozen expert teacher for DAgger distillation.
 
-The teacher is a trained MLPPolicy checkpoint that maps dictionary observations
-(imitation_target + proprioception) to action distribution parameters.
+The teacher is a trained MLPPolicy checkpoint (from train_expert) that maps
+dictionary observations (imitation_target + proprioception) to action
+distribution parameters.
 """
 
 import logging
@@ -14,7 +15,7 @@ from brax.training import distribution
 from brax.training.acme import running_statistics, specs
 from omegaconf import OmegaConf
 
-from scamper.agent.imitation_mlp.mlp_network import MLPPolicy
+from scamper.agent.expert.mlp_network import MLPPolicy
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,
@@ -26,10 +27,10 @@ def load_frozen_teacher(
     checkpoint_path: str,
     step: int | None = None,
 ) -> tuple[Callable, DictRunningStatisticsState, dict, Any]:
-    """Load a trained imitation_mlp teacher from checkpoint.
+    """Load a trained expert teacher from checkpoint.
 
     Args:
-        checkpoint_path: Path to imitation_mlp checkpoint directory.
+        checkpoint_path: Path to expert checkpoint directory (from train_expert).
         step: Specific step to load. None = latest.
 
     Returns:
@@ -94,7 +95,7 @@ def load_frozen_teacher(
 
     teacher_normalizer, teacher_params = policy_data
 
-    logging.info(f"Loaded imitation_mlp teacher from {checkpoint_path} at step {step}")
+    logging.info(f"Loaded expert teacher from {checkpoint_path} at step {step}")
 
     # Create query function
     teacher_fn = make_teacher_query_fn(mlp_module, teacher_params)

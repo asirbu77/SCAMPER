@@ -1,6 +1,6 @@
 """Network architectures for DAgger distillation.
 
-Defines encoder, decoder, and prior networks for distilling an imitation_mlp
+Defines encoder, decoder, and prior networks for distilling an expert
 teacher into a VAE student with a jointly trained prior.
 
 Key constraint: the Decoder and Prior parameter trees must exactly match

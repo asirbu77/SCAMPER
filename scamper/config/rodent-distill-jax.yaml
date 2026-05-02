@@ -1,7 +1,7 @@
 # =============================================================================
 # Rodent DAgger Distillation Configuration
 # =============================================================================
-# Distills a trained imitation_mlp teacher into a VAE student (encoder +
+# Distills a trained expert teacher into a VAE student (encoder +
 # decoder + prior) using DAgger-based supervised learning. Produces a
 # checkpoint compatible with task_transfer wrappers.
 # =============================================================================
@@ -10,7 +10,7 @@
 # Teacher Model Configuration
 # =============================================================================
 teacher_config:
-  checkpoint_path: null  # REQUIRED: Path to trained imitation_mlp checkpoint
+  checkpoint_path: null  # REQUIRED: Path to trained expert checkpoint
   checkpoint_step: null  # Specific step to load (null = latest)
 
 # =============================================================================

@@ -1,9 +1,8 @@
 """DAgger-based distillation training loop.
 
 Student (encoder + decoder + prior) rolls out in the environment,
-teacher (frozen imitation_mlp) annotates the collected states,
-and the student is trained via supervised learning through a
-variational information bottleneck.
+the frozen expert teacher annotates the collected states, and the student
+is trained via supervised learning through a variational information bottleneck.
 """
 
 import functools
@@ -39,7 +38,7 @@ from scamper.agent.distill.distill_networks import (
     make_student_inference_fn,
 )
 from scamper.agent.distill.teacher import load_frozen_teacher, make_teacher_query_fn
-from scamper.agent.imitation_mlp.ppo_networks import (
+from scamper.agent.expert.ppo_networks import (
     make_inference_fn as make_mlp_inference_fn,
     make_mlp_ppo_networks,
 )
@@ -137,7 +136,7 @@ def train(
         episode_length: Length of an episode.
         ckpt_mgr: Orbax checkpoint manager.
         config_dict: Configuration dictionary for checkpointing.
-        teacher_checkpoint_path: Path to the pretrained imitation_mlp checkpoint.
+        teacher_checkpoint_path: Path to the pretrained expert checkpoint.
         teacher_checkpoint_step: Optional step to load from teacher checkpoint.
         checkpoint_to_restore: Optional path to restore distill training from.
         ... (remaining args match prior_train.py pattern)

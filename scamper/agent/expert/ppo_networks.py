@@ -1,4 +1,4 @@
-"""PPO network definitions for MLP-based imitation learning.
+"""PPO network definitions for the expert (MLP-policy) trainer.
 
 Provides network containers, inference functions, and factory functions
 for PPO training with a plain MLP policy (no VAE/latent bottleneck).
@@ -17,7 +17,7 @@ from brax.training.types import PRNGKey
 from jax import numpy as jnp
 
 from scamper.agent.imitation.ppo_networks import make_dict_value_network
-from scamper.agent.imitation_mlp import mlp_network
+from scamper.agent.expert import mlp_network
 
 
 @flax.struct.dataclass

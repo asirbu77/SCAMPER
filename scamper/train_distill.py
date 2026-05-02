@@ -1,6 +1,6 @@
 """Entry point for DAgger distillation training.
 
-Distills a trained imitation_mlp teacher into a VAE student (encoder +
+Distills a trained expert teacher into a VAE student (encoder +
 decoder + prior) using online distillation (DAgger).
 """
 

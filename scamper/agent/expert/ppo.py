@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""PPO training for MLP-based imitation learning.
+"""PPO training for the expert (MLP-policy) trainer.
 
 Simplified version of the intention-based PPO training loop. Uses a plain MLP
 policy without VAE latent bottleneck, KL divergence, or AR(1) temporal losses.
@@ -39,7 +39,7 @@ from brax.training.types import Params, PRNGKey
 from mujoco_playground import wrapper as mp_wrapper
 
 from scamper.agent import checkpointing, gradients
-from scamper.agent.imitation_mlp import losses, ppo_networks
+from scamper.agent.expert import losses, ppo_networks
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,

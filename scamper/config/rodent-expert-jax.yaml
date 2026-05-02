@@ -1,9 +1,10 @@
 # =============================================================================
-# Rodent MLP Imitation Configuration
+# Rodent Expert Configuration
 # =============================================================================
-# Configuration for training a rodent imitation agent using PPO with a plain
+# Configuration for training a rodent expert teacher using PPO with a plain
 # MLP policy (no VAE latent bottleneck). Same environment and reward setup
-# as the intention-based imitation config.
+# as the intention-based imitation config. The resulting checkpoint is the
+# teacher consumed by train_distill / collect_rollout_dataset.
 # =============================================================================
 
 # =============================================================================
@@ -137,7 +138,7 @@ train_setup:
 # =============================================================================
 logging_config:
   project_name: SCAMPER
-  group_name: imitation-mlp
+  group_name: expert
   exp_name:
   clip_id: -1
   model_path: model_checkpoints/
