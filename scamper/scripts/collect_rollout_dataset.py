@@ -117,8 +117,8 @@ def parse_args() -> argparse.Namespace:
         "--logvars",
         type=float,
         nargs="*",
-        default=[-4.0, -2.0, 0.0],
-        help="Logvar values for non-deterministic prior rollouts (default: -4 -2 0)",
+        default=[-4.0, -3.0, -2.0, -1.0, -0.5, 0.0],
+        help="Logvar values for non-deterministic prior rollouts (default: -4 -3 -2 -1 -0.5 0)",
     )
     parser.add_argument(
         "--teacher-checkpoint-path",
@@ -130,8 +130,8 @@ def parse_args() -> argparse.Namespace:
         "--checkpoint-type",
         type=str,
         choices=["distill", "distill_prior"],
-        default="distill",
-        help="Type of checkpoint to load (default: distill)",
+        default="distill_prior",
+        help="Type of checkpoint to load (default: distill_prior)",
     )
     parser.add_argument(
         "--mujoco-impl",
