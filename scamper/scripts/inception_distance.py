@@ -35,12 +35,12 @@ import optax
 import scipy.linalg
 from tqdm import tqdm
 
-from scamper.analysis.discriminator.data_loading import (
+from scamper.utils.discriminator.data_loading import (
     list_h5_datasets,
     load_h5_dataset,
     load_h5_metadata,
 )
-from scamper.analysis.vae_network import make_vae_network
+from scamper.utils.vae_network import make_vae_network
 
 
 def parse_args() -> argparse.Namespace:
