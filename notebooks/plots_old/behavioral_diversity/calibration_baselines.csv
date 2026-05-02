@@ -1,4 +1,0 @@
-source,vendi,vendi_CI_lo,vendi_CI_hi,eff_clusters,eff_CI_lo,eff_CI_hi
-Motion Prior,17.16,16.819,17.469,20.825,20.184,21.415
-Behavior Prior,17.06,16.715,17.378,20.739,20.136,21.4
-Encoder-Decoder (avg),17.11,16.759,17.417,20.782,20.205,21.36
