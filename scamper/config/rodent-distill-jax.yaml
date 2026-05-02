@@ -124,7 +124,7 @@ network_config:
 # =============================================================================
 distill_config:
   kl_weight: 1.0
-  ar1_weight: 0.1
+  ar1_weight: 0.005
   grad_clip_norm: 10.0
 
   # Logvar clamping (matches PULSE defaults)
@@ -132,11 +132,11 @@ distill_config:
   logvar_min: -5.0
   logvar_max: 0.0
 
-  # KL schedule
-  use_kl_schedule: false
+  # KL schedule (ramp down from kl_start_weight to kl_end_weight)
+  use_kl_schedule: true
   kl_schedule_params:
-    kl_start_weight: 1e-5
-    kl_end_weight: 1.0
+    kl_start_weight: 1e-3
+    kl_end_weight: 1e-4
     kl_start_ramp: 0.0
     kl_end_ramp: 0.25
 
@@ -165,7 +165,7 @@ train_setup:
 
   train_config:
     num_envs: 4096
-    num_timesteps: 2_000_000_000
+    num_timesteps: 1_000_000_000
     batch_size: 1024
     num_minibatches: 16
     num_updates_per_batch: 4

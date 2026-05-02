@@ -120,7 +120,7 @@ prior_rollout_config:
 network_config:
   arch_name: distill_prior
   # RGM network architecture (newly trained)
-  rgm_layer_sizes: [1536, 1024, 512]
+  rgm_layer_sizes: [2048, 2048, 1024, 512]
   # Encoder/decoder/prior sizes and intention_size are loaded from distill checkpoint
 
 # =============================================================================

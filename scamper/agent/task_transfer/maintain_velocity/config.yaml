@@ -55,24 +55,24 @@ scratch:
 
 # Network architecture
 network:
-  policy_layers: [1024, 512, 256]
-  value_layers: [1024, 512, 256]
+  policy_layers: [2048, 1024, 512]
+  value_layers: [2048, 1024, 1024, 512]
 
 # Training parameters
 train:
-  num_timesteps: 2_000_000_000
-  episode_length: 2000
-  num_envs: 4096
+  num_timesteps: 400_000_000
+  episode_length: 1000
+  num_envs: 1024
   batch_size: 1024
   num_minibatches: 16
   num_updates_per_batch: 4
   learning_rate: 1e-4
-  entropy_cost: 1e-4
+  entropy_cost: 1e-2
   discounting: 0.99
-  clipping_epsilon: 0.2
+  clipping_epsilon: 0.3
   gae_lambda: 0.95
   max_grad_norm: 50.0
-  vf_loss_coefficient: 5.0
+  vf_loss_coefficient: 0.5
   reward_scaling: 1.0
   normalize_observations: true
   unroll_length: 20
@@ -82,15 +82,15 @@ train:
 
 # Environment settings
 env:
-  xml_variant: "limited-collisions"  # 'full-collisions', 'limited-collisions', or 'no-tail-collisions'
-  mujoco_impl: "jax"  # 'jax' or 'warp'
+  xml_variant: "no-tail-collisions"  # 'full-collisions', 'limited-collisions', or 'no-tail-collisions'
+  mujoco_impl: "warp"  # 'jax' or 'warp'
   init_z: 0.0
-  target_speed: 0.5
+  target_speed: 1.25
   # Reward term weights
   reward_weights:
     forward_velocity: 1.0
-    lateral_velocity: 0.5
-    angular_velocity_z: 0.1
+    lateral_velocity: 0.0
+    angular_velocity_z: 0.0
     control_diff_cost: 0.0
 
 # Checkpointing settings
@@ -101,11 +101,11 @@ checkpointing:
 
 # Logging settings
 logging:
-  project: "vnl-playground"
+  project: "SCAMPER"
   group_name: "maintain_velocity_transfer"
   exp_name: "maintain_velocity_transfer"
   render_camera: "close_profile-rodent"
   render_fps: 50
-  render_height: 480
-  render_width: 640
+  render_height: 720
+  render_width: 1280
   render_every: 1  # Render video every N evaluation steps (always renders first eval)
