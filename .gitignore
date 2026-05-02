@@ -1,17 +1,11 @@
 # SCAMPER specific gitignore:
 data/
-model_checkpoints/
 wandb/
-outputs/
-rollouts/
-patch.ipynb
-jax_cache/
-results/
 scratch
-notebooks/plots/
 pdfs/
 notes/
-notebooks/analysis/FinalNotebooks/Plots
+notebooks_private/
+plotting_data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -20,9 +14,6 @@ __pycache__/
 
 # sbatch scripts
 sbatch/
-
-# Claude
-CLAUDE.md
 
 # slurm output folder
 slurm_outputs/
