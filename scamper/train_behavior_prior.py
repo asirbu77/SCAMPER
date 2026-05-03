@@ -1,8 +1,8 @@
-"""
-Entry point for distill prior (RGM) network training.
+"""Entry point for behavior-prior network training.
 
-Load the config file, create environments, load pretrained distill
-encoder/decoder/prior, and start RGM training with KL loss.
+Load the config file, create environments, load the frozen
+encoder/decoder/motion-prior from a distill_expert checkpoint, and start
+behavior-prior training with KL loss.
 """
 
 import os
@@ -27,10 +27,10 @@ from scamper.environment.rodent import imitation
 from scamper.agent import checkpointing
 from scamper.agent import wandb_logging
 from scamper.agent.domain_randomization import domain_randomization_maker
-from scamper.agent.distill_prior import distill_prior_networks
-from scamper.agent.distill_prior import distill_prior_train
-from scamper.agent.distill_prior.rollout_logging import (
-    distill_prior_training_rollout_logging_fn,
+from scamper.agent.behavior_prior import behavior_prior_networks
+from scamper.agent.behavior_prior import behavior_prior_train
+from scamper.agent.behavior_prior.rollout_logging import (
+    behavior_prior_training_rollout_logging_fn,
 )
 from scamper.config import utils
 
@@ -44,10 +44,10 @@ def _setup_environment() -> None:
 
 
 @hydra.main(
-    version_base=None, config_path="config", config_name="rodent-distill-prior-jax"
+    version_base=None, config_path="config", config_name="rodent-behavior-prior-jax"
 )
 def main(cfg: DictConfig):
-    """Main function for RGM network training using Hydra configs."""
+    """Main function for behavior-prior network training using Hydra configs."""
 
     _setup_environment()
 
@@ -69,7 +69,7 @@ def main(cfg: DictConfig):
 
     # Determine how to load from checkpoint
     run_id, checkpoint_path, existing_run_state = (
-        checkpointing.load_from_run_state_distill_prior(cfg)
+        checkpointing.load_from_run_state_behavior_prior(cfg)
     )
 
     # Initialize checkpoint manager with DistillPriorNetwork prefix
@@ -113,7 +113,7 @@ def main(cfg: DictConfig):
     ) * steps_per_frame
     logging.info(f"episode_length {episode_length}")
 
-    logging.info("Using Distill Prior (RGM) Training Pipeline")
+    logging.info("Using Behavior-Prior Training Pipeline")
 
     # Initialize wandb logging
     wandb_logging.initialize_wandb_logging(
@@ -139,11 +139,12 @@ def main(cfg: DictConfig):
         wandb_run_id=wandb.run.id,
     )
 
-    # Get distill prior config
-    distill_prior_cfg = cfg.distill_prior_config
+    # Get behavior-prior config
+    # YAML block name kept as `distill_prior_config` for compat with saved configs.
+    behavior_prior_cfg = cfg.distill_prior_config
 
-    # Load teacher config to get encoder/decoder/prior network sizes
-    _, _, _, _, teacher_cfg = distill_prior_networks.load_frozen_distill_networks(
+    # Load teacher config to get encoder/decoder/motion-prior network sizes
+    _, _, _, _, teacher_cfg = behavior_prior_networks.load_frozen_distill_networks(
         cfg.teacher_config.checkpoint_path, step=cfg.teacher_config.checkpoint_step
     )
     # Update cfg.network_config with values from distill teacher
@@ -189,7 +190,7 @@ def main(cfg: DictConfig):
 
     # Setup training function
     train_fn = functools.partial(
-        distill_prior_train.train,
+        behavior_prior_train.train,
         **cfg.train_setup.train_config,
         num_evals=int(
             cfg.train_setup.train_config.num_timesteps / cfg.train_setup.eval_every
@@ -198,15 +199,17 @@ def main(cfg: DictConfig):
         episode_length=episode_length,
         distill_checkpoint_path=cfg.teacher_config.checkpoint_path,
         distill_checkpoint_step=cfg.teacher_config.checkpoint_step,
-        kl_weight=distill_prior_cfg.kl_weight,
-        use_kl_schedule=distill_prior_cfg.get("use_kl_schedule", True),
+        kl_weight=behavior_prior_cfg.kl_weight,
+        use_kl_schedule=behavior_prior_cfg.get("use_kl_schedule", True),
         kl_schedule_params=(
-            dict(distill_prior_cfg.kl_schedule_params)
-            if distill_prior_cfg.get("use_kl_schedule", True)
+            dict(behavior_prior_cfg.kl_schedule_params)
+            if behavior_prior_cfg.get("use_kl_schedule", True)
             else None
         ),
-        grad_clip_norm=distill_prior_cfg.get("grad_clip_norm", 10.0),
-        rgm_hidden_layer_sizes=tuple(cfg.network_config.rgm_layer_sizes),
+        grad_clip_norm=behavior_prior_cfg.get("grad_clip_norm", 10.0),
+        # YAML attribute name kept as `rgm_layer_sizes` for compat with saved
+        # configs; sizes the behavior prior in this pipeline.
+        behavior_prior_hidden_layer_sizes=tuple(cfg.network_config.rgm_layer_sizes),
         ckpt_mgr=ckpt_mgr,
         checkpoint_to_restore=cfg.train_setup.checkpoint_to_restore,
         config_dict=cfg_dict,
@@ -228,7 +231,9 @@ def main(cfg: DictConfig):
             if cfg.env_config.domain_randomization.use_domain_randomization
             else None
         ),
-        prior_rollout_config=(
+        # YAML block name kept as `prior_rollout_config` for compat with saved
+        # configs; in this pipeline it configures behavior-prior rollout eval.
+        behavior_prior_rollout_config=(
             dict(cfg.prior_rollout_config)
             if hasattr(cfg, "prior_rollout_config")
             and cfg.prior_rollout_config is not None
@@ -245,7 +250,7 @@ def main(cfg: DictConfig):
     jit_reset = jax.jit(rollout_env.reset)
     jit_step = jax.jit(rollout_env.step)
     policy_params_fn = functools.partial(
-        distill_prior_training_rollout_logging_fn,
+        behavior_prior_training_rollout_logging_fn,
         rollout_env,
         jit_reset,
         jit_step,
@@ -264,7 +269,7 @@ def main(cfg: DictConfig):
     try:
         checkpointing.cleanup_run_state(cfg)
         logging.info(
-            "Distill prior (RGM) training completed successfully, cleaned up run state"
+            "Behavior-prior training completed successfully, cleaned up run state"
         )
     except Exception as e:
         logging.warning(f"Failed to cleanup run state: {e}")

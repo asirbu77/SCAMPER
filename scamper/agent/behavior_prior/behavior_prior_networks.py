@@ -1,9 +1,9 @@
-"""
-Network definitions for distill prior (RGM) training.
+"""Network definitions for behavior-prior training.
 
 This module provides:
-- Loading frozen encoder/decoder/prior from a distill checkpoint
-- Creating a trainable RGM network (same architecture as mlp_prior.Prior)
+- Loading frozen encoder/decoder/motion-prior from a distill_expert checkpoint
+- Creating a trainable behavior-prior network (same architecture as
+  mlp_prior.Prior, which is reused as the underlying class)
 - Combining networks for checkpointing
 
 The key difference from mlp_prior is that the DistillEncoder takes
@@ -40,8 +40,8 @@ from scamper.agent.observation_utils import (
     normalize_dict_obs,
 )
 
-# Alias for clarity: the RGM has the same architecture as Prior
-RGM = Prior
+# Alias for clarity: the behavior prior reuses mlp_prior.Prior's architecture.
+BehaviorPrior = Prior
 
 
 def load_frozen_distill_networks(
@@ -59,7 +59,7 @@ def load_frozen_distill_networks(
         step: Specific step to load. If None, loads the latest.
 
     Returns:
-        Tuple of (encoder_params, decoder_params, prior_params,
+        Tuple of (encoder_params, decoder_params, motion_prior_params,
         normalizer_params, config_dict).  The ``*_params`` dicts are in
         Flax init format (``{"params": {...}}``).
     """
@@ -84,20 +84,21 @@ def load_frozen_distill_networks(
     latent_size = cfg.network_config.intention_size
     encoder_hidden = tuple(cfg.network_config.encoder_layer_sizes)
     decoder_hidden = tuple(cfg.network_config.decoder_layer_sizes)
-    prior_hidden = tuple(cfg.network_config.prior_layer_sizes)
+    # cfg attribute `prior_layer_sizes` kept for compat; sizes the motion prior.
+    motion_prior_hidden = tuple(cfg.network_config.prior_layer_sizes)
 
-    # Create abstract structures to match the checkpoint pytree
-    encoder, decoder, prior, _ = make_distill_networks(
+    # Create abstract structures to match the checkpoint pytree.
+    encoder, decoder, motion_prior, _ = make_distill_networks(
         obs_sizes=obs_sizes,
         action_size=action_size,
         latent_size=latent_size,
         encoder_hidden_layer_sizes=encoder_hidden,
         decoder_hidden_layer_sizes=decoder_hidden,
-        prior_hidden_layer_sizes=prior_hidden,
+        motion_prior_hidden_layer_sizes=motion_prior_hidden,
     )
 
     init_params = init_distill_params(
-        encoder, decoder, prior, obs_sizes, latent_size, jax.random.PRNGKey(0)
+        encoder, decoder, motion_prior, obs_sizes, latent_size, jax.random.PRNGKey(0)
     )
 
     # Recreate the optimizer used during distill training (structure must match)
@@ -139,38 +140,41 @@ def load_frozen_distill_networks(
     )
 
 
-def make_rgm_networks(
+def make_behavior_prior_networks(
     latent_size: int,
     proprioceptive_obs_size: int,
-    rgm_hidden_layer_sizes: Sequence[int] = (1024, 1024),
-) -> Tuple[RGM, networks.FeedForwardNetwork]:
-    """Create the trainable RGM network.
+    behavior_prior_hidden_layer_sizes: Sequence[int] = (1024, 1024),
+) -> Tuple[BehaviorPrior, networks.FeedForwardNetwork]:
+    """Create the trainable behavior-prior network.
 
-    The RGM has the same architecture as ``mlp_prior.Prior``: an MLP that
+    The behavior prior reuses ``mlp_prior.Prior``'s architecture: an MLP that
     maps proprioceptive observations to ``(mean, logvar)`` of a latent
     distribution.
 
     Args:
         latent_size: Dimension of the latent intention space.
         proprioceptive_obs_size: Size of proprioceptive observations.
-        rgm_hidden_layer_sizes: Hidden layer sizes for the RGM MLP.
+        behavior_prior_hidden_layer_sizes: Hidden layer sizes for the
+            behavior-prior MLP.
 
     Returns:
-        Tuple of (rgm_module, rgm_feedforward_network).
+        Tuple of (behavior_prior_module, behavior_prior_feedforward_network).
     """
-    rgm_module = RGM(
-        layer_sizes=list(rgm_hidden_layer_sizes),
+    behavior_prior_module = BehaviorPrior(
+        layer_sizes=list(behavior_prior_hidden_layer_sizes),
         latents=latent_size,
     )
 
     def init_fn(key):
         dummy_obs = jnp.zeros((1, proprioceptive_obs_size))
-        return rgm_module.init(key, dummy_obs)
+        return behavior_prior_module.init(key, dummy_obs)
 
     def apply_fn(params, obs):
-        return rgm_module.apply(params, obs)
+        return behavior_prior_module.apply(params, obs)
 
-    return rgm_module, networks.FeedForwardNetwork(init=init_fn, apply=apply_fn)
+    return behavior_prior_module, networks.FeedForwardNetwork(
+        init=init_fn, apply=apply_fn
+    )
 
 
 def make_distill_encoder_apply_fn(
@@ -315,20 +319,21 @@ def make_distill_encoder_decoder_inference_fn(
 def create_combined_checkpoint_params(
     encoder_params: Dict,
     decoder_params: Dict,
-    prior_params: Dict,
-    rgm_params: Dict,
+    motion_prior_params: Dict,
+    behavior_prior_params: Dict,
     normalizer_params: DictRunningStatisticsState,
 ) -> Tuple[DictRunningStatisticsState, Dict]:
     """Combine parameters into checkpoint-compatible format.
 
-    Creates a checkpoint with encoder, decoder, prior (from distill), and
-    rgm (newly trained).
+    Creates a checkpoint with encoder, decoder, motion prior (from
+    distill_expert), and behavior prior (newly trained).
 
     Args:
         encoder_params: DistillEncoder parameters (Flax init format).
         decoder_params: DistillDecoder parameters (Flax init format).
-        prior_params: DistillMotionPrior parameters (Flax init format).
-        rgm_params: RGM parameters (Flax init format or inner params).
+        motion_prior_params: DistillMotionPrior parameters (Flax init format).
+        behavior_prior_params: Behavior-prior parameters (Flax init format or
+            inner params).
         normalizer_params: Dict observation normalizer parameters.
 
     Returns:
@@ -340,27 +345,30 @@ def create_combined_checkpoint_params(
             return params["params"]
         return params
 
+    # Dict keys 'prior' and 'rgm' kept for compat with task_transfer loaders;
+    # 'prior' stores the motion prior, 'rgm' stores the behavior prior.
     combined_network_params = {
         "params": {
             "encoder": _extract_inner(encoder_params),
             "decoder": _extract_inner(decoder_params),
-            "prior": _extract_inner(prior_params),
-            "rgm": _extract_inner(rgm_params),
+            "prior": _extract_inner(motion_prior_params),
+            "rgm": _extract_inner(behavior_prior_params),
         }
     }
 
     return (normalizer_params, combined_network_params)
 
 
-def create_abstract_distill_prior_policy(
+def create_abstract_behavior_prior_policy(
     cfg: Dict,
-    rgm_hidden_layer_sizes: Sequence[int] = (1024, 1024),
+    behavior_prior_hidden_layer_sizes: Sequence[int] = (1024, 1024),
 ) -> Tuple[Any, Any]:
     """Create abstract policy structure for checkpoint restoration.
 
     Args:
         cfg: Configuration dictionary from checkpoint.
-        rgm_hidden_layer_sizes: Hidden layer sizes for RGM network.
+        behavior_prior_hidden_layer_sizes: Hidden layer sizes for the
+            behavior-prior network.
 
     Returns:
         Tuple of ``(normalizer_state, combined_policy_params)`` with correct
@@ -374,15 +382,20 @@ def create_abstract_distill_prior_policy(
 
     encoder_hidden = tuple(cfg["network_config"]["encoder_layer_sizes"])
     decoder_hidden = tuple(cfg["network_config"]["decoder_layer_sizes"])
-    prior_hidden = tuple(cfg["network_config"]["prior_layer_sizes"])
+    # cfg attribute `prior_layer_sizes` kept for compat; sizes the motion prior.
+    motion_prior_hidden = tuple(cfg["network_config"]["prior_layer_sizes"])
 
     action_param_size = action_size * 2
 
     # Create all modules
     enc = DistillEncoder(layer_sizes=list(encoder_hidden), latents=latent_size)
     dec = DistillDecoder(layer_sizes=list(decoder_hidden) + [action_param_size])
-    pri = DistillMotionPrior(layer_sizes=list(prior_hidden), latents=latent_size)
-    rgm = RGM(layer_sizes=list(rgm_hidden_layer_sizes), latents=latent_size)
+    motion_pri = DistillMotionPrior(
+        layer_sizes=list(motion_prior_hidden), latents=latent_size
+    )
+    behavior_pri = BehaviorPrior(
+        layer_sizes=list(behavior_prior_hidden_layer_sizes), latents=latent_size
+    )
 
     key = jax.random.PRNGKey(0)
     k1, k2, k3, k4 = jax.random.split(key, 4)
@@ -390,15 +403,16 @@ def create_abstract_distill_prior_policy(
     total_obs_size = reference_obs_size + proprioceptive_obs_size
     enc_init = enc.init(k1, jnp.zeros((1, total_obs_size)))
     dec_init = dec.init(k2, jnp.zeros((1, latent_size + proprioceptive_obs_size)))
-    pri_init = pri.init(k3, jnp.zeros((1, proprioceptive_obs_size)))
-    rgm_init = rgm.init(k4, jnp.zeros((1, proprioceptive_obs_size)))
+    motion_pri_init = motion_pri.init(k3, jnp.zeros((1, proprioceptive_obs_size)))
+    behavior_pri_init = behavior_pri.init(k4, jnp.zeros((1, proprioceptive_obs_size)))
 
+    # Dict keys 'prior' and 'rgm' kept for compat with task_transfer loaders.
     combined_params = {
         "params": {
             "encoder": enc_init["params"],
             "decoder": dec_init["params"],
-            "prior": pri_init["params"],
-            "rgm": rgm_init["params"],
+            "prior": motion_pri_init["params"],
+            "rgm": behavior_pri_init["params"],
         }
     }
 

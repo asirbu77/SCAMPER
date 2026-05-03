@@ -48,8 +48,8 @@ from scamper.agent.distill_expert.distill_networks import (
     make_student_inference_fn,
 )
 from scamper.agent.distill_expert.distill_train import DistillTrainingState
-from scamper.agent.distill_prior.distill_prior_networks import (
-    create_abstract_distill_prior_policy,
+from scamper.agent.behavior_prior.behavior_prior_networks import (
+    create_abstract_behavior_prior_policy,
     make_distill_encoder_decoder_inference_fn,
 )
 from scamper.agent.expert.mlp_network import MLPPolicy
@@ -498,7 +498,7 @@ def load_distill_prior_checkpoint_for_rollouts(
 
     # Create abstract policy for restoration
     rgm_hidden_layer_sizes = tuple(cfg.network_config.rgm_layer_sizes)
-    abstract_policy = create_abstract_distill_prior_policy(
+    abstract_policy = create_abstract_behavior_prior_policy(
         OmegaConf.to_container(cfg), rgm_hidden_layer_sizes
     )
 
@@ -549,7 +549,7 @@ def create_distill_prior_encoder_decoder_policy(
     )
 
 
-def create_rgm_policy_fn(
+def create_behavior_prior_policy_fn(
     policy_params: Tuple,
     cfg: Any,
     fixed_logvar: float | None,
@@ -960,7 +960,7 @@ def main_distill_prior(args):
     print("\n" + "=" * 60)
     print("Collecting RGM rollouts (deterministic, mean only)...")
     print("=" * 60)
-    rgm_policy_det = create_rgm_policy_fn(
+    behavior_prior_policy_det = create_behavior_prior_policy_fn(
         policy_params, cfg, fixed_logvar=0.0, deterministic=True
     )
     rng, key = jax.random.split(rng)
@@ -968,7 +968,7 @@ def main_distill_prior(args):
         "rgm_deterministic",
         env,
         reference_clips,
-        rgm_policy_det,
+        behavior_prior_policy_det,
         num_clips,
         num_steps,
         args.batch_size,
@@ -986,7 +986,7 @@ def main_distill_prior(args):
     print("\n" + "=" * 60)
     print("Collecting RGM rollouts (predicted logvar, per-dimension)...")
     print("=" * 60)
-    rgm_policy_predicted = create_rgm_policy_fn(
+    behavior_prior_policy_predicted = create_behavior_prior_policy_fn(
         policy_params, cfg, fixed_logvar=None, deterministic=False
     )
     rng, key = jax.random.split(rng)
@@ -994,7 +994,7 @@ def main_distill_prior(args):
         "rgm_predicted_logvar",
         env,
         reference_clips,
-        rgm_policy_predicted,
+        behavior_prior_policy_predicted,
         num_clips,
         num_steps,
         args.batch_size,
@@ -1014,7 +1014,7 @@ def main_distill_prior(args):
         print("\n" + "=" * 60)
         print(f"Collecting RGM rollouts (logvar={logvar}, std~{std:.2f})...")
         print("=" * 60)
-        rgm_policy = create_rgm_policy_fn(
+        behavior_prior_policy = create_behavior_prior_policy_fn(
             policy_params, cfg, fixed_logvar=logvar, deterministic=False
         )
         rng, key = jax.random.split(rng)
@@ -1027,7 +1027,7 @@ def main_distill_prior(args):
             key_name,
             env,
             reference_clips,
-            rgm_policy,
+            behavior_prior_policy,
             num_clips,
             num_steps,
             args.batch_size,

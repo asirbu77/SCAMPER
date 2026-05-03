@@ -1,9 +1,9 @@
-"""
-RGM (Random Generation Module) training.
+"""Behavior-prior training.
 
-Trains an RGM network to match the encoder distributions from a pretrained
-distill checkpoint. The distill encoder, decoder, and prior remain frozen;
-only the RGM is trained using KL divergence loss.
+Trains a behavior-prior network to match the encoder distributions from a
+pretrained distill_expert checkpoint. The distill_expert encoder, decoder,
+and motion prior remain frozen; only the behavior prior is trained, using
+KL divergence loss.
 
 Observations are expected as dictionaries with keys:
 - "imitation_target": Reference trajectory observations (flat array)
@@ -26,9 +26,9 @@ from brax.training.types import PRNGKey
 
 from scamper.agent import gradients
 from scamper.agent import checkpointing
-from scamper.agent.distill_prior import losses
-from scamper.agent.distill_prior import distill_prior_networks
-from scamper.agent.distill_prior import distill_prior_rollout_eval
+from scamper.agent.behavior_prior import losses
+from scamper.agent.behavior_prior import behavior_prior_networks
+from scamper.agent.behavior_prior import behavior_prior_rollout_eval
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,
@@ -53,21 +53,26 @@ _PMAP_AXIS_NAME = "i"
 
 
 @flax.struct.dataclass
-class RGMTrainingParams:
-    """Contains trainable parameters for RGM training."""
+class BehaviorPriorTrainingParams:
+    """Contains trainable parameters for behavior-prior training."""
 
-    rgm: types.Params  # Only RGM parameters are trainable
+    # Field name kept as 'rgm' for checkpoint-key compatibility (it becomes
+    # the "rgm" key in the saved params tree, which downstream task_transfer
+    # loaders depend on); the underlying network is a BehaviorPrior.
+    rgm: types.Params
 
 
 @flax.struct.dataclass
 class TrainingState:
-    """Contains training state for the RGM learner."""
+    """Contains training state for the behavior-prior learner."""
 
     optimizer_state: optax.OptState
-    params: RGMTrainingParams  # Only RGM params (trainable)
+    params: BehaviorPriorTrainingParams  # Only behavior-prior params (trainable)
     frozen_encoder_params: Dict  # Frozen DistillEncoder
     frozen_decoder_params: Dict  # Frozen DistillDecoder
-    frozen_prior_params: Dict  # Frozen DistillMotionPrior
+    # Field name kept as 'frozen_prior_params' for checkpoint-key compat;
+    # holds the frozen DistillMotionPrior params from the upstream checkpoint.
+    frozen_prior_params: Dict
     normalizer_params: DictRunningStatisticsState
     env_steps: jnp.ndarray
 
@@ -110,7 +115,7 @@ def train(
     num_resets_per_eval: int = 0,
     normalize_observations: bool = False,
     deterministic_eval: bool = False,
-    rgm_hidden_layer_sizes: Tuple[int, ...] = (1024, 1024),
+    behavior_prior_hidden_layer_sizes: Tuple[int, ...] = (1024, 1024),
     clamp_logvar: bool = True,
     logvar_min: float = -5.0,
     logvar_max: float = 0.0,
@@ -127,9 +132,9 @@ def train(
     wrap_for_training: Callable[..., mp_wrapper.Wrapper] = functools.partial(
         mp_wrapper.wrap_for_brax_training, full_reset=False
     ),
-    prior_rollout_config: Optional[dict] = None,
+    behavior_prior_rollout_config: Optional[dict] = None,
 ):
-    """RGM network training.
+    """Behavior-prior network training.
 
     Args:
         environment: The environment to train on.
@@ -137,9 +142,9 @@ def train(
         episode_length: Length of an episode.
         ckpt_mgr: Orbax checkpoint manager.
         config_dict: Configuration dictionary for checkpointing.
-        distill_checkpoint_path: Path to the pretrained distill checkpoint.
+        distill_checkpoint_path: Path to the pretrained distill_expert checkpoint.
         distill_checkpoint_step: Optional step to load from distill checkpoint.
-        checkpoint_to_restore: Optional path to restore RGM training from.
+        checkpoint_to_restore: Optional path to restore behavior-prior training from.
         action_repeat: Number of times to repeat actions.
         num_envs: Number of parallel environments.
         max_devices_per_host: Maximum devices per host.
@@ -157,7 +162,8 @@ def train(
         num_resets_per_eval: Number of environment resets per eval.
         normalize_observations: Whether to normalize observations.
         deterministic_eval: Whether to use deterministic policy for eval.
-        rgm_hidden_layer_sizes: Hidden layer sizes for RGM network.
+        behavior_prior_hidden_layer_sizes: Hidden layer sizes for the
+            behavior-prior network.
         clamp_logvar: Whether the distill encoder clamps logvar.
         logvar_min: Minimum logvar for the distill encoder.
         logvar_max: Maximum logvar for the distill encoder.
@@ -170,7 +176,8 @@ def train(
         kl_schedule_params: Parameters for KL weight schedule.
         checkpoint_callback: Callback after checkpointing.
         wrap_for_training: Function to wrap environment for training.
-        prior_rollout_config: Configuration for RGM rollout evaluation.
+        behavior_prior_rollout_config: Configuration for multi-mode behavior-prior
+            rollout evaluation.
 
     Returns:
         Tuple of (make_policy_fn, final_params, final_metrics).
@@ -208,18 +215,18 @@ def train(
         )
     ).astype(int)
 
-    # Load frozen distill networks
-    logging.info(f"Loading distill networks from: {distill_checkpoint_path}")
+    # Load frozen distill_expert networks (encoder, decoder, motion prior)
+    logging.info(f"Loading distill_expert networks from: {distill_checkpoint_path}")
     (
         encoder_params,
         decoder_params,
-        prior_params,
+        motion_prior_params,
         teacher_normalizer_params,
         teacher_cfg,
-    ) = distill_prior_networks.load_frozen_distill_networks(
+    ) = behavior_prior_networks.load_frozen_distill_networks(
         distill_checkpoint_path, step=distill_checkpoint_step
     )
-    logging.info("Distill encoder, decoder, and prior loaded successfully")
+    logging.info("Distill encoder, decoder, and motion prior loaded successfully")
 
     # Extract network config from distill teacher
     latent_size = teacher_cfg["network_config"]["intention_size"]
@@ -229,7 +236,10 @@ def train(
     decoder_hidden_layer_sizes = tuple(
         teacher_cfg["network_config"]["decoder_layer_sizes"]
     )
-    prior_hidden_layer_sizes = tuple(teacher_cfg["network_config"]["prior_layer_sizes"])
+    # cfg attribute `prior_layer_sizes` kept for compat; sizes the motion prior.
+    motion_prior_hidden_layer_sizes = tuple(
+        teacher_cfg["network_config"]["prior_layer_sizes"]
+    )
     action_size = teacher_cfg["network_config"]["action_size"]
     teacher_obs_sizes = teacher_cfg["network_config"]["obs_sizes"]
     proprioceptive_obs_size = teacher_obs_sizes["proprioception"]
@@ -240,7 +250,9 @@ def train(
     del key
     local_key = jax.random.fold_in(local_key, process_id)
     local_key, key_env, eval_key = jax.random.split(local_key, 3)
-    key_policy, key_rgm, policy_params_fn_key = jax.random.split(global_key, 3)
+    key_policy, key_behavior_prior, policy_params_fn_key = jax.random.split(
+        global_key, 3
+    )
     del global_key
 
     assert num_envs % device_count == 0
@@ -294,7 +306,8 @@ def train(
     # Get observation sizes from environment state
     obs_sizes = get_obs_sizes(env_state.obs)
 
-    # Update config with network info
+    # Update config with network info. Persisted dict keys 'prior_layer_sizes'
+    # and 'rgm_layer_sizes' kept for compat with task_transfer config reads.
     config_dict["network_config"].update(
         {
             "obs_sizes": obs_sizes,
@@ -303,8 +316,8 @@ def train(
             "intention_size": latent_size,
             "encoder_layer_sizes": list(encoder_hidden_layer_sizes),
             "decoder_layer_sizes": list(decoder_hidden_layer_sizes),
-            "prior_layer_sizes": list(prior_hidden_layer_sizes),
-            "rgm_layer_sizes": list(rgm_hidden_layer_sizes),
+            "prior_layer_sizes": list(motion_prior_hidden_layer_sizes),
+            "rgm_layer_sizes": list(behavior_prior_hidden_layer_sizes),
         }
     )
 
@@ -312,15 +325,15 @@ def train(
     if normalize_observations:
         normalize = running_statistics.normalize
 
-    # Create RGM network
-    _, rgm_network = distill_prior_networks.make_rgm_networks(
+    # Create behavior-prior network
+    _, behavior_prior_network = behavior_prior_networks.make_behavior_prior_networks(
         latent_size=latent_size,
         proprioceptive_obs_size=proprioceptive_obs_size,
-        rgm_hidden_layer_sizes=rgm_hidden_layer_sizes,
+        behavior_prior_hidden_layer_sizes=behavior_prior_hidden_layer_sizes,
     )
 
     # Create distill encoder apply function
-    encoder_apply_fn = distill_prior_networks.make_distill_encoder_apply_fn(
+    encoder_apply_fn = behavior_prior_networks.make_distill_encoder_apply_fn(
         encoder_hidden_layer_sizes=encoder_hidden_layer_sizes,
         latent_size=latent_size,
         obs_sizes=teacher_obs_sizes,
@@ -331,7 +344,7 @@ def train(
 
     # Create frozen encoder+decoder policy for data collection
     make_data_collection_policy = functools.partial(
-        distill_prior_networks.make_distill_encoder_decoder_inference_fn,
+        behavior_prior_networks.make_distill_encoder_decoder_inference_fn,
         encoder_hidden_layer_sizes=encoder_hidden_layer_sizes,
         decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
         latent_size=latent_size,
@@ -363,22 +376,26 @@ def train(
 
     # Create loss function
     loss_fn = functools.partial(
-        losses.compute_rgm_training_loss,
+        losses.compute_behavior_prior_training_loss,
         encoder_apply_fn=encoder_apply_fn,
-        rgm_apply_fn=rgm_network.apply,
+        behavior_prior_apply_fn=behavior_prior_network.apply,
         kl_weight=kl_weight,
         kl_schedule=kl_schedule_fn,
     )
 
-    # Initialize RGM parameters
-    init_rgm_params = rgm_network.init(key_rgm)
+    # Initialize behavior-prior parameters
+    init_behavior_prior_params = behavior_prior_network.init(key_behavior_prior)
 
+    # BehaviorPriorTrainingParams field 'rgm' kept for checkpoint compat;
+    # holds the behavior-prior params.
     training_state = TrainingState(
-        optimizer_state=optimizer.init(RGMTrainingParams(rgm=init_rgm_params)),
-        params=RGMTrainingParams(rgm=init_rgm_params),
+        optimizer_state=optimizer.init(
+            BehaviorPriorTrainingParams(rgm=init_behavior_prior_params)
+        ),
+        params=BehaviorPriorTrainingParams(rgm=init_behavior_prior_params),
         frozen_encoder_params=encoder_params,
         frozen_decoder_params=decoder_params,
-        frozen_prior_params=prior_params,
+        frozen_prior_params=motion_prior_params,
         normalizer_params=teacher_normalizer_params,
         env_steps=0,
     )
@@ -585,7 +602,7 @@ def train(
         normalizer_params, policy_params = params_tuple
         encoder_params = policy_params["params"]["encoder"]
         decoder_params = policy_params["params"]["decoder"]
-        return distill_prior_networks.make_distill_encoder_decoder_inference_fn(
+        return behavior_prior_networks.make_distill_encoder_decoder_inference_fn(
             encoder_params={"params": encoder_params},
             decoder_params={"params": decoder_params},
             normalizer_params=normalizer_params,
@@ -600,36 +617,43 @@ def train(
             logvar_max=logvar_max,
         )
 
-    # Initialize multi-mode RGM rollout evaluator if configured
+    # Initialize multi-mode behavior-prior rollout evaluator if configured
     multi_mode_evaluator = None
-    if prior_rollout_config is not None and prior_rollout_config.get("enabled", False):
-        logging.info("Initializing multi-mode RGM rollout evaluator")
+    if behavior_prior_rollout_config is not None and behavior_prior_rollout_config.get(
+        "enabled", False
+    ):
+        logging.info("Initializing multi-mode behavior-prior rollout evaluator")
         render_config = config_dict.get("render_config", {})
 
-        multi_mode_evaluator = distill_prior_rollout_eval.MultiModeRGMRolloutEvaluator(
-            env=environment,
-            intention_latent_size=latent_size,
-            action_size=action_size,
-            proprioceptive_obs_size=proprioceptive_obs_size,
-            decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
-            rgm_hidden_layer_sizes=rgm_hidden_layer_sizes,
-            preprocess_observations_fn=normalize,
-            max_steps=prior_rollout_config.get("max_steps", 200),
-            eval_interval=prior_rollout_config.get("eval_interval", 1),
-            render_fps=render_config.get("render_fps", 50),
-            render_camera_name=render_config.get("render_camera_name", "close_profile"),
-            model_path=str(ckpt_mgr.directory),
+        multi_mode_evaluator = (
+            behavior_prior_rollout_eval.MultiModeBehaviorPriorRolloutEvaluator(
+                env=environment,
+                intention_latent_size=latent_size,
+                action_size=action_size,
+                proprioceptive_obs_size=proprioceptive_obs_size,
+                decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
+                behavior_prior_hidden_layer_sizes=behavior_prior_hidden_layer_sizes,
+                preprocess_observations_fn=normalize,
+                max_steps=behavior_prior_rollout_config.get("max_steps", 200),
+                eval_interval=behavior_prior_rollout_config.get("eval_interval", 1),
+                render_fps=render_config.get("render_fps", 50),
+                render_camera_name=render_config.get(
+                    "render_camera_name", "close_profile"
+                ),
+                model_path=str(ckpt_mgr.directory),
+            )
         )
-        logging.info("Multi-mode RGM rollout evaluator initialized")
+        logging.info("Multi-mode behavior-prior rollout evaluator initialized")
 
     # Helper function to create combined checkpoint params
     def get_policy_params(training_state):
         ts = _unpmap(training_state)
-        return distill_prior_networks.create_combined_checkpoint_params(
+        # ts.params.rgm holds behavior-prior params; field name kept for compat.
+        return behavior_prior_networks.create_combined_checkpoint_params(
             encoder_params=ts.frozen_encoder_params,
             decoder_params=ts.frozen_decoder_params,
-            prior_params=ts.frozen_prior_params,
-            rgm_params=ts.params.rgm,
+            motion_prior_params=ts.frozen_prior_params,
+            behavior_prior_params=ts.params.rgm,
             normalizer_params=ts.normalizer_params,
         )
 
@@ -651,16 +675,18 @@ def train(
 
         policy_params_fn_key, reset_key = jax.random.split(policy_params_fn_key)
 
-        # Run multi-mode RGM rollout evaluation during initial eval
+        # Run multi-mode behavior-prior rollout evaluation during initial eval
         if multi_mode_evaluator is not None:
-            prior_metrics = multi_mode_evaluator.run_evaluation(
+            behavior_prior_metrics = multi_mode_evaluator.run_evaluation(
                 policy_params=policy_param,
                 eval_step=0,
                 reset_key=reset_key,
             )
-            if prior_metrics is not None:
-                metrics.update(prior_metrics)
-                logging.info(f"Initial RGM rollout metrics: {prior_metrics}")
+            if behavior_prior_metrics is not None:
+                metrics.update(behavior_prior_metrics)
+                logging.info(
+                    f"Initial behavior-prior rollout metrics: {behavior_prior_metrics}"
+                )
 
         # Render initial video to wandb
         _, policy_params_fn_key = jax.random.split(policy_params_fn_key)
@@ -718,16 +744,18 @@ def train(
 
             policy_params_fn_key, reset_key = jax.random.split(policy_params_fn_key)
 
-            # Run multi-mode RGM rollout evaluation if configured
+            # Run multi-mode behavior-prior rollout evaluation if configured
             if multi_mode_evaluator is not None:
-                prior_metrics = multi_mode_evaluator.run_evaluation(
+                behavior_prior_metrics = multi_mode_evaluator.run_evaluation(
                     policy_params=policy_param,
                     eval_step=it,
                     reset_key=reset_key,
                 )
-                if prior_metrics is not None:
-                    metrics.update(prior_metrics)
-                    logging.info(f"RGM rollout metrics: {prior_metrics}")
+                if behavior_prior_metrics is not None:
+                    metrics.update(behavior_prior_metrics)
+                    logging.info(
+                        f"Behavior-prior rollout metrics: {behavior_prior_metrics}"
+                    )
 
             # Encoder-decoder logging
             _, policy_params_fn_key = jax.random.split(policy_params_fn_key)

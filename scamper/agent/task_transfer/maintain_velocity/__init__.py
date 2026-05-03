@@ -23,7 +23,7 @@ __all__ = [
     "load_distill_prior_checkpoint",
     "make_decoder_inference_fn",
     "make_prior_inference_fn",
-    "make_rgm_inference_fn",
+    "make_behavior_prior_inference_fn",
     "discover_existing_run_state",
     "save_run_state",
     "cleanup_run_state",

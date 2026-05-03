@@ -1,18 +1,19 @@
 # =============================================================================
-# Rodent Distill Prior (RGM) Training Configuration
+# Rodent Behavior-Prior Training Configuration
 # =============================================================================
-# Configuration for training an RGM (Random Generation Module) network to
-# match encoder distributions from a pretrained distill model. The distill
-# encoder, decoder, and prior are frozen; only the RGM is trained using
-# KL divergence loss.
+# Configuration for training a behavior-prior network on top of a pretrained
+# distill_expert checkpoint. The distill_expert encoder, decoder, and motion
+# prior are frozen; only the behavior prior is trained, using KL divergence
+# loss against the encoder's per-step latent distribution.
 # =============================================================================
 
 # =============================================================================
-# Teacher Model Configuration (pretrained distill)
+# Teacher Model Configuration (pretrained distill_expert)
 # =============================================================================
-# Path to the pretrained distill checkpoint with encoder, decoder, and prior
+# Path to the pretrained distill_expert checkpoint with encoder, decoder, and
+# motion prior.
 teacher_config:
-  # Path to pretrained distill checkpoint (REQUIRED)
+  # Path to pretrained distill_expert checkpoint (REQUIRED)
   checkpoint_path: null
   checkpoint_step: null               # Specific step to load (null = latest)
 
@@ -55,7 +56,7 @@ env_config:
     torso_mass_jitter: [-0.02, 0.02]
     qpos0_jitter: [-0.05, 0.05]
 
-  # Reward Terms (for evaluation only — RGM training doesn't use rewards)
+  # Reward Terms (for evaluation only — behavior-prior training doesn't use rewards)
   reward_terms:
     root_pos:
       exp_scale: 0.035
@@ -105,8 +106,10 @@ render_config:
   render_interval: 1
 
 # =============================================================================
-# Multi-Mode RGM Rollout Evaluation Configuration
+# Multi-Mode Behavior-Prior Rollout Evaluation Configuration
 # =============================================================================
+# YAML key kept as `prior_rollout_config` for compat with saved configs and
+# the train_behavior_prior reader; configures behavior-prior rollout eval.
 prior_rollout_config:
   enabled: true
   eval_interval: 1
@@ -115,17 +118,23 @@ prior_rollout_config:
 # =============================================================================
 # Network Architecture
 # =============================================================================
-# RGM network architecture. Encoder, decoder, and prior are loaded from
-# distill checkpoint.
+# Behavior-prior network architecture. Encoder, decoder, and motion prior are
+# loaded from the distill_expert checkpoint.
 network_config:
+  # arch_name kept as `distill_prior` for compat with saved configs and any
+  # downstream branching that reads it.
   arch_name: distill_prior
-  # RGM network architecture (newly trained)
+  # YAML key kept as `rgm_layer_sizes` for backward-compat with saved configs +
+  # task_transfer reads; sizes the (newly trained) behavior prior.
   rgm_layer_sizes: [2048, 2048, 1024, 512]
-  # Encoder/decoder/prior sizes and intention_size are loaded from distill checkpoint
+  # Encoder/decoder/motion-prior sizes and intention_size are loaded from
+  # the distill_expert checkpoint.
 
 # =============================================================================
-# Distill Prior (RGM) Training Loss Configuration
+# Behavior-Prior Training Loss Configuration
 # =============================================================================
+# YAML block name kept as `distill_prior_config` for compat with saved configs
+# and the train_behavior_prior reader.
 distill_prior_config:
   kl_weight: 1                        # Weight for KL divergence loss
   grad_clip_norm: 10.0                # Gradient clipping norm
@@ -166,7 +175,7 @@ train_setup:
 # =============================================================================
 logging_config:
   project_name: SCAMPER
-  group_name: distill_prior
+  group_name: behavior_prior
   exp_name: null
   clip_id: -1
   model_path: null

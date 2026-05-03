@@ -1,12 +1,11 @@
-"""
-Rollout logging for distill prior (RGM) training.
+"""Rollout logging for behavior-prior training.
 
-Logs latent statistics for monitoring how well the RGM is learning to match
-the distill encoder, including:
+Logs latent statistics for monitoring how well the behavior prior is learning
+to match the distill encoder, including:
 - Distill encoder latent statistics (mean/logvar)
-- RGM latent statistics (mean/logvar)
-- Frozen distill prior latent statistics (for comparison)
-- KL divergence between encoder and RGM over rollout
+- Behavior-prior latent statistics (mean/logvar)
+- Frozen motion-prior latent statistics (for comparison)
+- KL divergence between encoder and behavior prior over rollout
 - Video rendering (optional)
 """
 
@@ -24,9 +23,9 @@ from scamper.agent.distill_expert.distill_networks import (
     DistillEncoder,
     DistillMotionPrior,
 )
-from scamper.agent.distill_prior import distill_prior_networks
+from scamper.agent.behavior_prior import behavior_prior_networks
 from scamper.agent.mlp_prior.losses import compute_encoder_prior_kl_loss
-from scamper.agent.mlp_prior.prior_networks import Prior as RGM
+from scamper.agent.mlp_prior.prior_networks import Prior as BehaviorPrior
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     flatten_obs_dict,
@@ -34,7 +33,7 @@ from scamper.agent.observation_utils import (
 )
 
 
-def distill_prior_training_rollout_logging_fn(
+def behavior_prior_training_rollout_logging_fn(
     env,
     jit_reset,
     jit_step,
@@ -46,10 +45,11 @@ def distill_prior_training_rollout_logging_fn(
     reset_key: jax.Array,
     render_video: bool = False,
 ) -> None:
-    """Rollout logging for RGM training — logs latent statistics.
+    """Rollout logging for behavior-prior training — logs latent statistics.
 
     Runs a rollout with the frozen distill encoder+decoder, then compares
-    the distill encoder, RGM, and frozen distill prior latent distributions.
+    the distill encoder, behavior prior, and frozen motion prior latent
+    distributions.
 
     Args:
         env: Environment for rollout.
@@ -58,7 +58,10 @@ def distill_prior_training_rollout_logging_fn(
         cfg: Configuration.
         model_path: Path for saving videos.
         current_step: Current training step.
-        params: Policy parameters (normalizer, {encoder, decoder, prior, rgm}).
+        params: Policy parameters; the saved tree is
+            (normalizer, {encoder, decoder, prior, rgm}). The "prior" entry
+            holds the motion-prior weights and "rgm" the behavior-prior
+            weights — dict keys kept for checkpoint compat.
         policy_params_fn_key: Random key for rollout.
         reset_key: Random key for environment reset.
         render_video: Whether to render video.
@@ -69,12 +72,13 @@ def distill_prior_training_rollout_logging_fn(
     )
     episode_length = int(cfg.env_config.clip_length * steps_per_frame)
 
-    # Extract network config
+    # Extract network config. cfg attributes `prior_layer_sizes` and
+    # `rgm_layer_sizes` kept for compat with saved configs.
     latent_size = cfg.network_config.intention_size
     encoder_hidden_layer_sizes = tuple(cfg.network_config.encoder_layer_sizes)
     decoder_hidden_layer_sizes = tuple(cfg.network_config.decoder_layer_sizes)
-    prior_hidden_layer_sizes = tuple(cfg.network_config.prior_layer_sizes)
-    rgm_hidden_layer_sizes = tuple(
+    motion_prior_hidden_layer_sizes = tuple(cfg.network_config.prior_layer_sizes)
+    behavior_prior_hidden_layer_sizes = tuple(
         cfg.network_config.get("rgm_layer_sizes", [1536, 1024, 512])
     )
     action_size = cfg.network_config.action_size
@@ -85,15 +89,15 @@ def distill_prior_training_rollout_logging_fn(
     if cfg.train_setup.train_config.normalize_observations:
         normalize = running_statistics.normalize
 
-    # Extract params
+    # Extract params. Dict keys 'prior' and 'rgm' kept for checkpoint compat.
     normalizer_params, network_params = params
     encoder_params = network_params["params"]["encoder"]
     decoder_params = network_params["params"]["decoder"]
-    prior_params = network_params["params"]["prior"]
-    rgm_params = network_params["params"]["rgm"]
+    motion_prior_params = network_params["params"]["prior"]
+    behavior_prior_params = network_params["params"]["rgm"]
 
     # Create encoder+decoder policy for rollout
-    policy = distill_prior_networks.make_distill_encoder_decoder_inference_fn(
+    policy = behavior_prior_networks.make_distill_encoder_decoder_inference_fn(
         encoder_params={"params": encoder_params},
         decoder_params={"params": decoder_params},
         normalizer_params=normalizer_params,
@@ -112,14 +116,14 @@ def distill_prior_training_rollout_logging_fn(
         latents=latent_size,
     )
 
-    # Create RGM and distill prior modules for comparison
-    rgm_module = RGM(
-        layer_sizes=list(rgm_hidden_layer_sizes),
+    # Create behavior-prior and motion-prior modules for comparison
+    behavior_prior_module = BehaviorPrior(
+        layer_sizes=list(behavior_prior_hidden_layer_sizes),
         latents=latent_size,
     )
 
-    prior_module = DistillMotionPrior(
-        layer_sizes=list(prior_hidden_layer_sizes),
+    motion_prior_module = DistillMotionPrior(
+        layer_sizes=list(motion_prior_hidden_layer_sizes),
         latents=latent_size,
     )
 
@@ -130,10 +134,10 @@ def distill_prior_training_rollout_logging_fn(
     rollout = [state]
     encoder_means = []
     encoder_logvars = []
-    rgm_means = []
-    rgm_logvars = []
-    prior_means = []
-    prior_logvars = []
+    behavior_prior_means = []
+    behavior_prior_logvars = []
+    motion_prior_means = []
+    motion_prior_logvars = []
 
     for i in range(episode_length):
         _, act_rng = jax.random.split(act_rng)
@@ -147,22 +151,24 @@ def distill_prior_training_rollout_logging_fn(
         encoder_means.append(extras["latent_mean"])
         encoder_logvars.append(extras["latent_logvar"])
 
-        # Get RGM and prior latent statistics
+        # Get behavior-prior and motion-prior latent statistics
         flat_obs = flatten_obs_dict(obs)
         normalized_obs = normalize_dict_obs(flat_obs, normalizer_params)
         proprio_obs = normalized_obs["proprioception"]
 
-        # RGM output
-        rgm_mean, rgm_logvar = rgm_module.apply({"params": rgm_params}, proprio_obs)
-        rgm_means.append(rgm_mean)
-        rgm_logvars.append(rgm_logvar)
-
-        # Frozen distill prior output (for comparison)
-        prior_mean, prior_logvar = prior_module.apply(
-            {"params": prior_params}, proprio_obs
+        # Behavior-prior output
+        behavior_prior_mean, behavior_prior_logvar = behavior_prior_module.apply(
+            {"params": behavior_prior_params}, proprio_obs
         )
-        prior_means.append(prior_mean)
-        prior_logvars.append(prior_logvar)
+        behavior_prior_means.append(behavior_prior_mean)
+        behavior_prior_logvars.append(behavior_prior_logvar)
+
+        # Frozen motion-prior output (for comparison)
+        motion_prior_mean, motion_prior_logvar = motion_prior_module.apply(
+            {"params": motion_prior_params}, proprio_obs
+        )
+        motion_prior_means.append(motion_prior_mean)
+        motion_prior_logvars.append(motion_prior_logvar)
 
         state = jit_step(state, ctrl)
         rollout.append(state)
@@ -170,10 +176,10 @@ def distill_prior_training_rollout_logging_fn(
     # Stack latents
     encoder_means = jnp.stack(encoder_means)
     encoder_logvars = jnp.stack(encoder_logvars)
-    rgm_means = jnp.stack(rgm_means)
-    rgm_logvars = jnp.stack(rgm_logvars)
-    prior_means = jnp.stack(prior_means)
-    prior_logvars = jnp.stack(prior_logvars)
+    behavior_prior_means = jnp.stack(behavior_prior_means)
+    behavior_prior_logvars = jnp.stack(behavior_prior_logvars)
+    motion_prior_means = jnp.stack(motion_prior_means)
+    motion_prior_logvars = jnp.stack(motion_prior_logvars)
 
     # Compute per-dimension statistics
     encoder_means_mean = jnp.mean(encoder_means, axis=0)
@@ -181,15 +187,15 @@ def distill_prior_training_rollout_logging_fn(
     encoder_logvars_mean = jnp.mean(encoder_logvars, axis=0)
     encoder_logvars_std = jnp.std(encoder_logvars, axis=0)
 
-    rgm_means_mean = jnp.mean(rgm_means, axis=0)
-    rgm_means_std = jnp.std(rgm_means, axis=0)
-    rgm_logvars_mean = jnp.mean(rgm_logvars, axis=0)
-    rgm_logvars_std = jnp.std(rgm_logvars, axis=0)
+    behavior_prior_means_mean = jnp.mean(behavior_prior_means, axis=0)
+    behavior_prior_means_std = jnp.std(behavior_prior_means, axis=0)
+    behavior_prior_logvars_mean = jnp.mean(behavior_prior_logvars, axis=0)
+    behavior_prior_logvars_std = jnp.std(behavior_prior_logvars, axis=0)
 
-    prior_means_mean = jnp.mean(prior_means, axis=0)
-    prior_means_std = jnp.std(prior_means, axis=0)
-    prior_logvars_mean = jnp.mean(prior_logvars, axis=0)
-    prior_logvars_std = jnp.std(prior_logvars, axis=0)
+    motion_prior_means_mean = jnp.mean(motion_prior_means, axis=0)
+    motion_prior_means_std = jnp.std(motion_prior_means, axis=0)
+    motion_prior_logvars_mean = jnp.mean(motion_prior_logvars, axis=0)
+    motion_prior_logvars_std = jnp.std(motion_prior_logvars, axis=0)
 
     # Compute KL divergence over rollout
     kl_per_timestep = []
@@ -197,8 +203,8 @@ def distill_prior_training_rollout_logging_fn(
         kl = compute_encoder_prior_kl_loss(
             encoder_means[t : t + 1],
             encoder_logvars[t : t + 1],
-            rgm_means[t : t + 1],
-            rgm_logvars[t : t + 1],
+            behavior_prior_means[t : t + 1],
+            behavior_prior_logvars[t : t + 1],
         )
         kl_per_timestep.append(float(kl))
 
@@ -211,16 +217,30 @@ def distill_prior_training_rollout_logging_fn(
                 f"latents/encoder_means_std{i}": float(encoder_means_std[i]),
                 f"latents/encoder_logvars_mean{i}": float(encoder_logvars_mean[i]),
                 f"latents/encoder_logvars_std{i}": float(encoder_logvars_std[i]),
-                # RGM latent statistics
-                f"latents/rgm_means_mean{i}": float(rgm_means_mean[i]),
-                f"latents/rgm_means_std{i}": float(rgm_means_std[i]),
-                f"latents/rgm_logvars_mean{i}": float(rgm_logvars_mean[i]),
-                f"latents/rgm_logvars_std{i}": float(rgm_logvars_std[i]),
-                # Frozen distill prior latent statistics (for comparison)
-                f"latents/distill_prior_means_mean{i}": float(prior_means_mean[i]),
-                f"latents/distill_prior_means_std{i}": float(prior_means_std[i]),
-                f"latents/distill_prior_logvars_mean{i}": float(prior_logvars_mean[i]),
-                f"latents/distill_prior_logvars_std{i}": float(prior_logvars_std[i]),
+                # Behavior-prior latent statistics
+                f"latents/behavior_prior_means_mean{i}": float(
+                    behavior_prior_means_mean[i]
+                ),
+                f"latents/behavior_prior_means_std{i}": float(
+                    behavior_prior_means_std[i]
+                ),
+                f"latents/behavior_prior_logvars_mean{i}": float(
+                    behavior_prior_logvars_mean[i]
+                ),
+                f"latents/behavior_prior_logvars_std{i}": float(
+                    behavior_prior_logvars_std[i]
+                ),
+                # Frozen motion-prior latent statistics (for comparison)
+                f"latents/motion_prior_means_mean{i}": float(
+                    motion_prior_means_mean[i]
+                ),
+                f"latents/motion_prior_means_std{i}": float(motion_prior_means_std[i]),
+                f"latents/motion_prior_logvars_mean{i}": float(
+                    motion_prior_logvars_mean[i]
+                ),
+                f"latents/motion_prior_logvars_std{i}": float(
+                    motion_prior_logvars_std[i]
+                ),
             },
             commit=False,
         )

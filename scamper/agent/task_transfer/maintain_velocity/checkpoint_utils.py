@@ -24,8 +24,8 @@ from brax.training.acme import running_statistics, specs
 from omegaconf import DictConfig, OmegaConf
 
 from scamper.agent import checkpointing
-from scamper.agent.distill_prior.distill_prior_networks import (
-    create_abstract_distill_prior_policy,
+from scamper.agent.behavior_prior.behavior_prior_networks import (
+    create_abstract_behavior_prior_policy,
 )
 from scamper.agent.imitation import intention_network
 from scamper.agent.mlp_prior.prior_networks import Prior
@@ -136,7 +136,7 @@ def load_distill_prior_checkpoint(
 
     rgm_hidden_layer_sizes = tuple(cfg.network_config.rgm_layer_sizes)
 
-    abstract_policy = create_abstract_distill_prior_policy(
+    abstract_policy = create_abstract_behavior_prior_policy(
         OmegaConf.to_container(cfg), rgm_hidden_layer_sizes
     )
 
@@ -358,7 +358,7 @@ def make_prior_inference_fn(
     return prior_fn
 
 
-def make_rgm_inference_fn(
+def make_behavior_prior_inference_fn(
     rgm_params: Dict,
     normalizer_params: DictRunningStatisticsState,
     config: Dict,
@@ -385,7 +385,7 @@ def make_rgm_inference_fn(
 
     proprio_normalizer = normalizer_params.proprioception
 
-    def rgm_fn(proprio: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def behavior_prior_fn(proprio: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Apply RGM to proprioceptive observations.
 
         Args:
@@ -400,7 +400,7 @@ def make_rgm_inference_fn(
 
         return mean, logvar
 
-    return rgm_fn
+    return behavior_prior_fn
 
 
 # ---------------------------------------------------------------------------

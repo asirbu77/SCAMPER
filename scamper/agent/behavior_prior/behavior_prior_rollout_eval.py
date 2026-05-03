@@ -1,9 +1,8 @@
-"""
-Multi-mode RGM rollout evaluation for distill prior training.
+"""Multi-mode behavior-prior rollout evaluation.
 
-Evaluates the RGM network's ability to generate plausible actions by running
-rollouts using RGM + DistillDecoder in 6 different modes:
-1. Deterministic: z = rgm_mean (no sampling)
+Evaluates the behavior-prior network's ability to generate plausible actions
+by running rollouts using BehaviorPrior + DistillDecoder in 6 different modes:
+1. Deterministic: z = behavior_prior_mean (no sampling)
 2. logvar=0: z sampled with std=1.0
 3. logvar=-2: z sampled with std≈0.368
 4. logvar=-3: z sampled with std≈0.187
@@ -22,7 +21,7 @@ from brax.training import distribution, types
 from brax.training.acme import running_statistics
 
 from scamper.agent.distill_expert.distill_networks import DistillDecoder
-from scamper.agent.mlp_prior.prior_networks import Prior as RGM
+from scamper.agent.mlp_prior.prior_networks import Prior as BehaviorPrior
 from scamper.agent.mlp_prior.prior_rollout_eval import (
     check_termination_nan,
     compute_world_zaxis_termination,
@@ -31,34 +30,36 @@ from scamper.agent.mlp_prior.prior_rollout_eval import (
 from scamper.agent.observation_utils import DictRunningStatisticsState
 
 
-def create_rgm_policy(
-    rgm_network_params: Dict,
+def create_behavior_prior_policy(
+    behavior_prior_network_params: Dict,
     decoder_network_params: Dict,
     normalizer_params: running_statistics.RunningStatisticsState,
     intention_latent_size: int,
     action_size: int,
     proprioceptive_obs_size: int,
     decoder_hidden_layer_sizes: Sequence[int] = (1024, 1024, 512),
-    rgm_hidden_layer_sizes: Sequence[int] = (1024, 1024),
+    behavior_prior_hidden_layer_sizes: Sequence[int] = (1024, 1024),
     preprocess_observations_fn: types.PreprocessObservationFn = types.identity_observation_preprocessor,
     fixed_logvar: Optional[float] = -2.0,
     deterministic: bool = False,
 ) -> Callable:
-    """Create a policy function that uses only the RGM and DistillDecoder.
+    """Create a policy that uses only the behavior prior + DistillDecoder.
 
     Args:
-        rgm_network_params: Parameters for the RGM network.
+        behavior_prior_network_params: Parameters for the behavior-prior network.
         decoder_network_params: Parameters for the DistillDecoder network.
         normalizer_params: Running statistics for observation normalization.
         intention_latent_size: Size of the intention latent space.
         action_size: Size of the action space.
         proprioceptive_obs_size: Size of proprioceptive observations.
         decoder_hidden_layer_sizes: Hidden layer sizes for decoder.
-        rgm_hidden_layer_sizes: Hidden layer sizes for RGM.
+        behavior_prior_hidden_layer_sizes: Hidden layer sizes for the
+            behavior prior.
         preprocess_observations_fn: Function to normalize observations.
         fixed_logvar: Fixed log-variance to use for latent sampling. If None,
             uses the network-predicted logvar per dimension.
-        deterministic: If True, use mean of RGM distribution instead of sampling.
+        deterministic: If True, use mean of the behavior-prior distribution
+            instead of sampling.
 
     Returns:
         Policy function ``(proprioceptive_obs, rng_key) -> (actions, extras)``.
@@ -69,8 +70,8 @@ def create_rgm_policy(
 
     action_param_size = action_size * 2
 
-    rgm_module = RGM(
-        layer_sizes=list(rgm_hidden_layer_sizes),
+    behavior_prior_module = BehaviorPrior(
+        layer_sizes=list(behavior_prior_hidden_layer_sizes),
         latents=intention_latent_size,
     )
 
@@ -92,22 +93,22 @@ def create_rgm_policy(
             proprioceptive_obs, normalizer_params
         )
 
-        # Get RGM distribution
-        rgm_mean, rgm_logvar = rgm_module.apply(
-            {"params": rgm_network_params}, normalized_obs
+        # Get behavior-prior distribution
+        behavior_prior_mean, behavior_prior_logvar = behavior_prior_module.apply(
+            {"params": behavior_prior_network_params}, normalized_obs
         )
 
         # Determine which logvar to use for sampling
         if fixed_logvar is not None:
-            logvar_for_sampling = jnp.full_like(rgm_mean, fixed_logvar)
+            logvar_for_sampling = jnp.full_like(behavior_prior_mean, fixed_logvar)
         else:
-            logvar_for_sampling = rgm_logvar
+            logvar_for_sampling = behavior_prior_logvar
 
-        # Sample from RGM
+        # Sample from behavior prior
         if deterministic:
-            z = rgm_mean
+            z = behavior_prior_mean
         else:
-            z = reparameterize(key_sample, rgm_mean, logvar_for_sampling)
+            z = reparameterize(key_sample, behavior_prior_mean, logvar_for_sampling)
 
         # Decode to action distribution parameters
         decoder_input = jnp.concatenate([z, normalized_obs], axis=-1)
@@ -119,8 +120,8 @@ def create_rgm_policy(
         action = parametric_action_distribution.mode(logits)
 
         extras = {
-            "rgm_mean": rgm_mean,
-            "rgm_logvar": rgm_logvar,
+            "behavior_prior_mean": behavior_prior_mean,
+            "behavior_prior_logvar": behavior_prior_logvar,
             "intention": z,
             "logits": logits,
         }
@@ -130,29 +131,32 @@ def create_rgm_policy(
     return policy_fn
 
 
-def extract_rgm_decoder_params(
+def extract_behavior_prior_decoder_params(
     policy_params: Tuple,
 ) -> Tuple[Dict, Dict, DictRunningStatisticsState]:
-    """Extract RGM and decoder parameters from full policy params.
+    """Extract behavior-prior and decoder parameters from full policy params.
 
     Args:
         policy_params: Tuple of (normalizer_params, network_params).
 
     Returns:
-        Tuple of (rgm_params, decoder_params, normalizer_params).
+        Tuple of (behavior_prior_params, decoder_params, normalizer_params).
+        Behavior-prior params are read from the saved ``"rgm"`` dict key
+        (kept for checkpoint-compat with task_transfer loaders).
     """
     normalizer_params, network_params = policy_params
-    rgm_params = network_params["params"]["rgm"]
+    # Dict key 'rgm' kept for compat; holds the behavior-prior params.
+    behavior_prior_params = network_params["params"]["rgm"]
     decoder_params = network_params["params"]["decoder"]
-    return rgm_params, decoder_params, normalizer_params
+    return behavior_prior_params, decoder_params, normalizer_params
 
 
-class MultiModeRGMRolloutEvaluator:
-    """Evaluator for running RGM-only rollouts in multiple modes.
+class MultiModeBehaviorPriorRolloutEvaluator:
+    """Evaluator for running behavior-prior-only rollouts in multiple modes.
 
     Runs evaluation in 6 modes with the same logvar values as
     ``mlp_prior.prior_rollout_eval.MultiModePriorRolloutEvaluator``.
-    Uses RGM + DistillDecoder instead of Prior + Decoder.
+    Uses BehaviorPrior + DistillDecoder instead of Prior + Decoder.
     """
 
     def __init__(
@@ -162,7 +166,7 @@ class MultiModeRGMRolloutEvaluator:
         action_size: int,
         proprioceptive_obs_size: int,
         decoder_hidden_layer_sizes: Sequence[int],
-        rgm_hidden_layer_sizes: Sequence[int],
+        behavior_prior_hidden_layer_sizes: Sequence[int],
         preprocess_observations_fn: types.PreprocessObservationFn,
         max_steps: int = 200,
         eval_interval: int = 1,
@@ -175,7 +179,7 @@ class MultiModeRGMRolloutEvaluator:
         self.action_size = action_size
         self.proprioceptive_obs_size = proprioceptive_obs_size
         self.decoder_hidden_layer_sizes = decoder_hidden_layer_sizes
-        self.rgm_hidden_layer_sizes = rgm_hidden_layer_sizes
+        self.behavior_prior_hidden_layer_sizes = behavior_prior_hidden_layer_sizes
         self.preprocess_observations_fn = preprocess_observations_fn
         self.max_steps = max_steps
         self.eval_interval = eval_interval
@@ -197,22 +201,24 @@ class MultiModeRGMRolloutEvaluator:
 
     def _build_single_rollout_fn(self, policy_params: Tuple, mode: Dict):
         """Build the jitted single rollout function for a specific mode."""
-        rgm_params, decoder_params, normalizer_params = extract_rgm_decoder_params(
-            policy_params
-        )
+        (
+            behavior_prior_params,
+            decoder_params,
+            normalizer_params,
+        ) = extract_behavior_prior_decoder_params(policy_params)
 
         # Extract proprioceptive-only normalizer from dict normalizer
         proprio_normalizer_params = normalizer_params.proprioception
 
-        policy_fn = create_rgm_policy(
-            rgm_network_params=rgm_params,
+        policy_fn = create_behavior_prior_policy(
+            behavior_prior_network_params=behavior_prior_params,
             decoder_network_params=decoder_params,
             normalizer_params=proprio_normalizer_params,
             intention_latent_size=self.intention_latent_size,
             action_size=self.action_size,
             proprioceptive_obs_size=self.proprioceptive_obs_size,
             decoder_hidden_layer_sizes=self.decoder_hidden_layer_sizes,
-            rgm_hidden_layer_sizes=self.rgm_hidden_layer_sizes,
+            behavior_prior_hidden_layer_sizes=self.behavior_prior_hidden_layer_sizes,
             preprocess_observations_fn=self.preprocess_observations_fn,
             fixed_logvar=mode["fixed_logvar"],
             deterministic=mode["deterministic"],
@@ -286,14 +292,17 @@ class MultiModeRGMRolloutEvaluator:
         )
 
         if len(frames) > 0:
-            video_path = f"{self.model_path}/rgm_rollout_{mode_name}_{current_step}.mp4"
+            video_path = (
+                f"{self.model_path}/behavior_prior_rollout_"
+                f"{mode_name}_{current_step}.mp4"
+            )
             with imageio.get_writer(video_path, fps=self.render_fps) as writer:
                 for frame in frames:
                     writer.append_data(frame)
 
             wandb.log(
                 {
-                    f"videos/rgm_rollout_{mode_name}": wandb.Video(
+                    f"videos/behavior_prior_rollout_{mode_name}": wandb.Video(
                         video_path, format="mp4"
                     )
                 },
@@ -306,7 +315,7 @@ class MultiModeRGMRolloutEvaluator:
         eval_step: int,
         reset_key: jax.Array,
     ) -> Optional[Dict[str, float]]:
-        """Run RGM rollout evaluation in all 6 modes from a shared initial state.
+        """Run behavior-prior rollout evaluation in all 6 modes from a shared initial state.
 
         Args:
             policy_params: Current policy parameters.

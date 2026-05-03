@@ -63,7 +63,7 @@ from scamper.agent.task_transfer.arena_forage.checkpoint_utils import (
     load_distill_prior_checkpoint,
     make_decoder_inference_fn,
     make_prior_inference_fn,
-    make_rgm_inference_fn,
+    make_behavior_prior_inference_fn,
     # Checkpointing / run state
     discover_existing_run_state,
     save_run_state,
@@ -290,13 +290,15 @@ def main(cfg: DictConfig) -> None:
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
-            rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
+            behavior_prior_fn = make_behavior_prior_inference_fn(
+                rgm_params, normalizer_params, ckpt_cfg
+            )
             mode_cfg = cfg.distill_prior
             rgm_logvar = mode_cfg.get("rgm_logvar", None)
             return PriorRGMDecoderHighLevelWrapper(
                 base_env,
                 prior_fn,
-                rgm_fn,
+                behavior_prior_fn,
                 decoder_fn,
                 latent_size,
                 proprio_size,
@@ -306,12 +308,14 @@ def main(cfg: DictConfig) -> None:
                 rgm_logvar=rgm_logvar,
             )
         elif cfg.mode == "rgm_only":
-            rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
+            behavior_prior_fn = make_behavior_prior_inference_fn(
+                rgm_params, normalizer_params, ckpt_cfg
+            )
             mode_cfg = cfg.rgm_only
             rgm_logvar = mode_cfg.get("rgm_logvar", None)
             return RGMDecoderHighLevelWrapper(
                 base_env,
-                rgm_fn,
+                behavior_prior_fn,
                 decoder_fn,
                 latent_size,
                 proprio_size,
