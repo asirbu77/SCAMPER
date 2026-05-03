@@ -1,7 +1,7 @@
-"""Entry point for DAgger distillation training.
+"""Entry point for DAgger distillation of the expert teacher.
 
 Distills a trained expert teacher into a VAE student (encoder +
-decoder + prior) using online distillation (DAgger).
+decoder + motion prior) using online distillation (DAgger).
 """
 
 import os
@@ -24,9 +24,9 @@ from scamper.environment.reference_clips import ReferenceClips
 from scamper.environment.rodent import imitation
 
 from scamper.agent import checkpointing, wandb_logging
-from scamper.agent.distill import distill_train
-from scamper.agent.distill.rollout_logging import distill_rollout_logging_fn
-from scamper.agent.distill.teacher import load_frozen_teacher
+from scamper.agent.distill_expert import distill_train
+from scamper.agent.distill_expert.rollout_logging import distill_rollout_logging_fn
+from scamper.agent.distill_expert.teacher import load_frozen_teacher
 from scamper.agent.domain_randomization import domain_randomization_maker
 from scamper.config import utils
 
@@ -39,9 +39,11 @@ def _setup_environment() -> None:
     os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
-@hydra.main(version_base=None, config_path="config", config_name="rodent-distill-jax")
+@hydra.main(
+    version_base=None, config_path="config", config_name="rodent-distill-expert-jax"
+)
 def main(cfg: DictConfig):
-    """Main function for DAgger distillation training."""
+    """Main function for DAgger distillation of the expert teacher."""
 
     _setup_environment()
 
@@ -194,7 +196,9 @@ def main(cfg: DictConfig):
         latent_size=cfg.network_config.latent_size,
         encoder_hidden_layer_sizes=tuple(cfg.network_config.encoder_layer_sizes),
         decoder_hidden_layer_sizes=tuple(cfg.network_config.decoder_layer_sizes),
-        prior_hidden_layer_sizes=tuple(cfg.network_config.prior_layer_sizes),
+        # YAML attribute name kept as `prior_layer_sizes` for compat; sizes the
+        # motion prior in this pipeline.
+        motion_prior_hidden_layer_sizes=tuple(cfg.network_config.prior_layer_sizes),
         clamp_logvar=distill_cfg.get("clamp_logvar", True),
         logvar_min=distill_cfg.get("logvar_min", -5.0),
         logvar_max=distill_cfg.get("logvar_max", 0.0),
@@ -220,7 +224,9 @@ def main(cfg: DictConfig):
             else None
         ),
         hard_negative_mining=distill_cfg.get("hard_negative_mining", True),
-        prior_rollout_config=(
+        # YAML block name kept as `prior_rollout_config` for compat with saved
+        # configs; in this pipeline it configures motion-prior rollout eval.
+        motion_prior_rollout_config=(
             dict(cfg.prior_rollout_config)
             if hasattr(cfg, "prior_rollout_config")
             and cfg.prior_rollout_config is not None

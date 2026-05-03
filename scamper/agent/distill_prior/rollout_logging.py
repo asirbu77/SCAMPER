@@ -20,7 +20,10 @@ import wandb
 from brax.training.acme import running_statistics
 from omegaconf import DictConfig
 
-from scamper.agent.distill.distill_networks import DistillEncoder, DistillPrior
+from scamper.agent.distill_expert.distill_networks import (
+    DistillEncoder,
+    DistillMotionPrior,
+)
 from scamper.agent.distill_prior import distill_prior_networks
 from scamper.agent.mlp_prior.losses import compute_encoder_prior_kl_loss
 from scamper.agent.mlp_prior.prior_networks import Prior as RGM
@@ -115,7 +118,7 @@ def distill_prior_training_rollout_logging_fn(
         latents=latent_size,
     )
 
-    prior_module = DistillPrior(
+    prior_module = DistillMotionPrior(
         layer_sizes=list(prior_hidden_layer_sizes),
         latents=latent_size,
     )

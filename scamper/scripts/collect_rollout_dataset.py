@@ -40,14 +40,14 @@ from brax.training import distribution
 from brax.training.acme import running_statistics, specs
 from omegaconf import OmegaConf
 
-from scamper.agent.distill.distill_networks import (
+from scamper.agent.distill_expert.distill_networks import (
     DistillNetworkParams,
     create_abstract_distill_policy,
     init_distill_params,
     make_distill_networks,
     make_student_inference_fn,
 )
-from scamper.agent.distill.distill_train import DistillTrainingState
+from scamper.agent.distill_expert.distill_train import DistillTrainingState
 from scamper.agent.distill_prior.distill_prior_networks import (
     create_abstract_distill_prior_policy,
     make_distill_encoder_decoder_inference_fn,
@@ -243,7 +243,7 @@ def create_abstract_distill_training_state(
     latent_size: int,
     encoder_hidden_layer_sizes: Sequence[int],
     decoder_hidden_layer_sizes: Sequence[int],
-    prior_hidden_layer_sizes: Sequence[int],
+    motion_prior_hidden_layer_sizes: Sequence[int],
 ) -> DistillTrainingState:
     """Create abstract DistillTrainingState for checkpoint restoration.
 
@@ -253,23 +253,23 @@ def create_abstract_distill_training_state(
         latent_size: Dimension of the latent space.
         encoder_hidden_layer_sizes: Hidden layer sizes for encoder.
         decoder_hidden_layer_sizes: Hidden layer sizes for decoder.
-        prior_hidden_layer_sizes: Hidden layer sizes for prior.
+        motion_prior_hidden_layer_sizes: Hidden layer sizes for motion prior.
 
     Returns:
         DistillTrainingState with correct structure for Orbax restoration.
     """
-    encoder, decoder, prior, _ = make_distill_networks(
+    encoder, decoder, motion_prior, _ = make_distill_networks(
         obs_sizes=obs_sizes,
         action_size=action_size,
         latent_size=latent_size,
         encoder_hidden_layer_sizes=encoder_hidden_layer_sizes,
         decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
-        prior_hidden_layer_sizes=prior_hidden_layer_sizes,
+        motion_prior_hidden_layer_sizes=motion_prior_hidden_layer_sizes,
     )
 
     rng = jax.random.PRNGKey(0)
     init_params = init_distill_params(
-        encoder, decoder, prior, obs_sizes, latent_size, rng
+        encoder, decoder, motion_prior, obs_sizes, latent_size, rng
     )
 
     # Must match the optimizer structure from distill_train.py
@@ -341,7 +341,9 @@ def load_distill_checkpoint(
     latent_size = int(cfg.network_config.intention_size)
     encoder_layer_sizes = tuple(cfg.network_config.encoder_layer_sizes)
     decoder_layer_sizes = tuple(cfg.network_config.decoder_layer_sizes)
-    prior_layer_sizes = tuple(cfg.network_config.prior_layer_sizes)
+    # YAML attribute name kept as `prior_layer_sizes` for compat with saved
+    # configs; in this pipeline it sizes the motion prior.
+    motion_prior_layer_sizes = tuple(cfg.network_config.prior_layer_sizes)
 
     # Construct abstract trees
     abstract_policy = create_abstract_distill_policy(
@@ -350,7 +352,7 @@ def load_distill_checkpoint(
         action_size=action_size,
         encoder_hidden_layer_sizes=encoder_layer_sizes,
         decoder_hidden_layer_sizes=decoder_layer_sizes,
-        prior_hidden_layer_sizes=prior_layer_sizes,
+        motion_prior_hidden_layer_sizes=motion_prior_layer_sizes,
     )
 
     abstract_train_state = create_abstract_distill_training_state(
@@ -359,7 +361,7 @@ def load_distill_checkpoint(
         latent_size=latent_size,
         encoder_hidden_layer_sizes=encoder_layer_sizes,
         decoder_hidden_layer_sizes=decoder_layer_sizes,
-        prior_hidden_layer_sizes=prior_layer_sizes,
+        motion_prior_hidden_layer_sizes=motion_prior_layer_sizes,
     )
 
     abstract_teacher = create_abstract_teacher(
@@ -446,13 +448,15 @@ def create_student_encoder_decoder_policy(
     action_size = int(cfg.network_config.action_size)
     latent_size = int(cfg.network_config.intention_size)
 
+    # cfg.network_config.prior_layer_sizes attribute kept for compat; sizes
+    # the motion prior in this pipeline.
     encoder, decoder, _, action_dist = make_distill_networks(
         obs_sizes=obs_sizes,
         action_size=action_size,
         latent_size=latent_size,
         encoder_hidden_layer_sizes=tuple(cfg.network_config.encoder_layer_sizes),
         decoder_hidden_layer_sizes=tuple(cfg.network_config.decoder_layer_sizes),
-        prior_hidden_layer_sizes=tuple(cfg.network_config.prior_layer_sizes),
+        motion_prior_hidden_layer_sizes=tuple(cfg.network_config.prior_layer_sizes),
     )
 
     make_policy = make_student_inference_fn(

@@ -13,7 +13,7 @@ import mujoco
 import wandb
 from omegaconf import DictConfig
 
-from scamper.agent.distill.distill_networks import (
+from scamper.agent.distill_expert.distill_networks import (
     DistillNetworkParams,
 )
 from scamper.agent.observation_utils import (
@@ -50,7 +50,8 @@ def distill_rollout_logging_fn(
         current_step: Current training step.
         params: Compatible checkpoint params (normalizer, combined_params).
         normalizer_params: Student's observation normalizer.
-        network_params: DistillNetworkParams (encoder, decoder, prior).
+        network_params: DistillNetworkParams (encoder, decoder, motion-prior
+            stored under the ``prior`` field for checkpoint compat).
         policy_params_fn_key: Random key for rollout.
         reset_key: Random key for environment reset.
         render_video: Whether to render videos.
@@ -58,7 +59,7 @@ def distill_rollout_logging_fn(
     if not render_video:
         return
 
-    from scamper.agent.distill.distill_networks import (
+    from scamper.agent.distill_expert.distill_networks import (
         make_distill_networks,
         make_logging_inference_fn,
     )
@@ -77,13 +78,15 @@ def distill_rollout_logging_fn(
 
     # Create network modules
     distill_cfg = cfg.distill_config
-    encoder, decoder, prior, action_dist = make_distill_networks(
+    # cfg.network_config.prior_layer_sizes attribute name kept for compat with
+    # saved configs; in this pipeline it sizes the motion prior.
+    encoder, decoder, motion_prior, action_dist = make_distill_networks(
         obs_sizes=obs_sizes,
         action_size=action_size,
         latent_size=latent_size,
         encoder_hidden_layer_sizes=tuple(cfg.network_config.encoder_layer_sizes),
         decoder_hidden_layer_sizes=tuple(cfg.network_config.decoder_layer_sizes),
-        prior_hidden_layer_sizes=tuple(cfg.network_config.prior_layer_sizes),
+        motion_prior_hidden_layer_sizes=tuple(cfg.network_config.prior_layer_sizes),
         clamp_logvar=distill_cfg.get("clamp_logvar", True),
         logvar_min=distill_cfg.get("logvar_min", -5.0),
         logvar_max=distill_cfg.get("logvar_max", 0.0),
@@ -91,7 +94,12 @@ def distill_rollout_logging_fn(
 
     # Create student inference function
     make_logging_policy = make_logging_inference_fn(
-        encoder, decoder, action_dist, obs_sizes, latent_size, prior=prior
+        encoder,
+        decoder,
+        action_dist,
+        obs_sizes,
+        latent_size,
+        motion_prior=motion_prior,
     )
     jit_student_policy = jax.jit(make_logging_policy(deterministic=True))
 
@@ -100,8 +108,8 @@ def distill_rollout_logging_fn(
     rollout = [state]
     latent_means = []
     latent_logvars = []
-    prior_means = []
-    prior_logvars = []
+    motion_prior_means = []
+    motion_prior_logvars = []
 
     _, act_rng = jax.random.split(policy_params_fn_key)
 
@@ -115,8 +123,8 @@ def distill_rollout_logging_fn(
 
         latent_means.append(extras["latent_mean"])
         latent_logvars.append(extras["latent_logvar"])
-        prior_means.append(extras["prior_mean"])
-        prior_logvars.append(extras["prior_logvar"])
+        motion_prior_means.append(extras["motion_prior_mean"])
+        motion_prior_logvars.append(extras["motion_prior_logvar"])
 
         state = jit_step(state, ctrl)
         rollout.append(state)
@@ -141,22 +149,28 @@ def distill_rollout_logging_fn(
             commit=False,
         )
 
-    # --- Log prior latent statistics per dimension ---
-    prior_means = jnp.stack(prior_means)
-    prior_logvars = jnp.stack(prior_logvars)
+    # --- Log motion-prior latent statistics per dimension ---
+    motion_prior_means = jnp.stack(motion_prior_means)
+    motion_prior_logvars = jnp.stack(motion_prior_logvars)
 
-    prior_means_mean = jnp.mean(prior_means, axis=0)
-    prior_means_std = jnp.std(prior_means, axis=0)
-    prior_logvars_mean = jnp.mean(prior_logvars, axis=0)
-    prior_logvars_std = jnp.std(prior_logvars, axis=0)
+    motion_prior_means_mean = jnp.mean(motion_prior_means, axis=0)
+    motion_prior_means_std = jnp.std(motion_prior_means, axis=0)
+    motion_prior_logvars_mean = jnp.mean(motion_prior_logvars, axis=0)
+    motion_prior_logvars_std = jnp.std(motion_prior_logvars, axis=0)
 
-    for i in range(prior_means_mean.shape[-1]):
+    for i in range(motion_prior_means_mean.shape[-1]):
         wandb.log(
             {
-                f"latents/prior_means_mean{i}": float(prior_means_mean[i]),
-                f"latents/prior_means_std{i}": float(prior_means_std[i]),
-                f"latents/prior_logvars_mean{i}": float(prior_logvars_mean[i]),
-                f"latents/prior_logvars_std{i}": float(prior_logvars_std[i]),
+                f"latents/motion_prior_means_mean{i}": float(
+                    motion_prior_means_mean[i]
+                ),
+                f"latents/motion_prior_means_std{i}": float(motion_prior_means_std[i]),
+                f"latents/motion_prior_logvars_mean{i}": float(
+                    motion_prior_logvars_mean[i]
+                ),
+                f"latents/motion_prior_logvars_std{i}": float(
+                    motion_prior_logvars_std[i]
+                ),
             },
             commit=False,
         )
@@ -195,7 +209,7 @@ def _render_teacher_video(
     env, jit_reset, jit_step, cfg, model_path, current_step, reset_key
 ):
     """Render teacher rollout on the same clip for comparison."""
-    from scamper.agent.distill.teacher import load_frozen_teacher
+    from scamper.agent.distill_expert.teacher import load_frozen_teacher
     from brax.training import distribution
 
     try:

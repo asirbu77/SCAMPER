@@ -1,8 +1,8 @@
 # =============================================================================
-# Rodent DAgger Distillation Configuration
+# Rodent DAgger Distillation Configuration (expert -> motion prior)
 # =============================================================================
-# Distills a trained expert teacher into a VAE student (encoder +
-# decoder + prior) using DAgger-based supervised learning. Produces a
+# Distills a trained expert teacher into a VAE student (encoder + decoder +
+# motion prior) using DAgger-based supervised learning. Produces a
 # checkpoint compatible with task_transfer wrappers.
 # =============================================================================
 
@@ -102,8 +102,11 @@ render_config:
   render_interval: 1
 
 # =============================================================================
-# Multi-Mode Prior Rollout Evaluation
+# Multi-Mode Motion-Prior Rollout Evaluation
 # =============================================================================
+# YAML key kept as `prior_rollout_config` for backward-compat with saved
+# configs and the train_distill_expert.py reader; configures motion-prior
+# rollout evaluation.
 prior_rollout_config:
   enabled: true
   eval_interval: 1
@@ -117,6 +120,8 @@ network_config:
   latent_size: 16
   encoder_layer_sizes: [2048, 1024, 1024]
   decoder_layer_sizes: [1024, 1024, 512]
+  # YAML key kept as `prior_layer_sizes` for backward-compat with existing
+  # checkpoints + downstream task_transfer config reads; sizes the motion prior.
   prior_layer_sizes: [1536, 1024, 512]
 
 # =============================================================================

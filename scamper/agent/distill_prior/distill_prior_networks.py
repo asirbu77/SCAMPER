@@ -23,16 +23,16 @@ from flax import linen as nn
 from omegaconf import OmegaConf
 
 from scamper.agent import checkpointing
-from scamper.agent.distill.distill_networks import (
+from scamper.agent.distill_expert.distill_networks import (
     DistillDecoder,
     DistillEncoder,
     DistillNetworkParams,
-    DistillPrior,
+    DistillMotionPrior,
     init_distill_params,
     make_distill_networks,
     reparameterize,
 )
-from scamper.agent.distill.distill_train import DistillTrainingState
+from scamper.agent.distill_expert.distill_train import DistillTrainingState
 from scamper.agent.mlp_prior.prior_networks import Prior
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
@@ -327,7 +327,7 @@ def create_combined_checkpoint_params(
     Args:
         encoder_params: DistillEncoder parameters (Flax init format).
         decoder_params: DistillDecoder parameters (Flax init format).
-        prior_params: DistillPrior parameters (Flax init format).
+        prior_params: DistillMotionPrior parameters (Flax init format).
         rgm_params: RGM parameters (Flax init format or inner params).
         normalizer_params: Dict observation normalizer parameters.
 
@@ -381,7 +381,7 @@ def create_abstract_distill_prior_policy(
     # Create all modules
     enc = DistillEncoder(layer_sizes=list(encoder_hidden), latents=latent_size)
     dec = DistillDecoder(layer_sizes=list(decoder_hidden) + [action_param_size])
-    pri = DistillPrior(layer_sizes=list(prior_hidden), latents=latent_size)
+    pri = DistillMotionPrior(layer_sizes=list(prior_hidden), latents=latent_size)
     rgm = RGM(layer_sizes=list(rgm_hidden_layer_sizes), latents=latent_size)
 
     key = jax.random.PRNGKey(0)

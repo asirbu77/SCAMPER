@@ -67,7 +67,7 @@ class TrainingState:
     params: RGMTrainingParams  # Only RGM params (trainable)
     frozen_encoder_params: Dict  # Frozen DistillEncoder
     frozen_decoder_params: Dict  # Frozen DistillDecoder
-    frozen_prior_params: Dict  # Frozen DistillPrior
+    frozen_prior_params: Dict  # Frozen DistillMotionPrior
     normalizer_params: DictRunningStatisticsState
     env_steps: jnp.ndarray
 

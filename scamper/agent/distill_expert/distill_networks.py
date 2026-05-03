@@ -1,11 +1,11 @@
-"""Network architectures for DAgger distillation.
+"""Network architectures for DAgger distillation of the expert teacher.
 
-Defines encoder, decoder, and prior networks for distilling an expert
-teacher into a VAE student with a jointly trained prior.
+Defines encoder, decoder, and motion-prior networks for distilling an expert
+teacher into a VAE student with a jointly trained motion prior.
 
-Key constraint: the Decoder and Prior parameter trees must exactly match
-those of intention_network.Decoder and mlp_prior.Prior respectively, so that
-checkpoints are compatible with task_transfer wrappers.
+Key constraint: the Decoder and motion-prior parameter trees must exactly
+match those of intention_network.Decoder and mlp_prior.Prior respectively,
+so that checkpoints are compatible with task_transfer wrappers.
 """
 
 from collections.abc import Mapping, Sequence
@@ -102,8 +102,8 @@ class DistillDecoder(nn.Module):
         return x, {}
 
 
-class DistillPrior(nn.Module):
-    """Prior: maps proprioception -> (mu, logvar).
+class DistillMotionPrior(nn.Module):
+    """Motion prior: maps proprioception -> (mu, logvar).
 
     Layer and output head naming matches mlp_prior.Prior (hidden_0, hidden_1,
     ..., fc2_mean, fc2_logvar) for checkpoint compatibility with task_transfer.
@@ -155,6 +155,10 @@ class DistillNetworkParams:
 
     encoder: types.Params
     decoder: types.Params
+    # Field name kept as 'prior' for checkpoint-key compatibility (it becomes
+    # the "prior" key in the saved params tree, which downstream
+    # task_transfer loaders depend on); the underlying network is a
+    # DistillMotionPrior.
     prior: types.Params
 
 
@@ -183,17 +187,20 @@ def make_distill_networks(
     latent_size: int = 16,
     encoder_hidden_layer_sizes: Sequence[int] = (2048, 1024, 1024),
     decoder_hidden_layer_sizes: Sequence[int] = (1024, 1024, 512),
-    prior_hidden_layer_sizes: Sequence[int] = (1536, 1024, 512),
+    motion_prior_hidden_layer_sizes: Sequence[int] = (1536, 1024, 512),
     clamp_logvar: bool = True,
     logvar_min: float = -5.0,
     logvar_max: float = 0.0,
 ) -> tuple[
-    DistillEncoder, DistillDecoder, DistillPrior, distribution.ParametricDistribution
+    DistillEncoder,
+    DistillDecoder,
+    DistillMotionPrior,
+    distribution.ParametricDistribution,
 ]:
     """Create the three network modules and the action distribution.
 
     Returns:
-        Tuple of (encoder, decoder, prior, action_distribution).
+        Tuple of (encoder, decoder, motion_prior, action_distribution).
     """
     action_param_size = action_size * 2  # mean + logstd for NormalTanh
 
@@ -207,8 +214,8 @@ def make_distill_networks(
     decoder = DistillDecoder(
         layer_sizes=list(decoder_hidden_layer_sizes) + [action_param_size],
     )
-    prior = DistillPrior(
-        layer_sizes=list(prior_hidden_layer_sizes),
+    motion_prior = DistillMotionPrior(
+        layer_sizes=list(motion_prior_hidden_layer_sizes),
         latents=latent_size,
         clamp_logvar=clamp_logvar,
         logvar_min=logvar_min,
@@ -216,13 +223,13 @@ def make_distill_networks(
     )
     action_dist = distribution.NormalTanhDistribution(event_size=action_size)
 
-    return encoder, decoder, prior, action_dist
+    return encoder, decoder, motion_prior, action_dist
 
 
 def init_distill_params(
     encoder: DistillEncoder,
     decoder: DistillDecoder,
-    prior: DistillPrior,
+    motion_prior: DistillMotionPrior,
     obs_sizes: Mapping[str, int],
     latent_size: int,
     rng: jax.Array,
@@ -230,25 +237,26 @@ def init_distill_params(
     """Initialize all three network parameters.
 
     Returns:
-        DistillNetworkParams with encoder, decoder, prior params.
+        DistillNetworkParams with encoder, decoder, motion-prior params.
     """
-    rng_enc, rng_dec, rng_prior = jax.random.split(rng, 3)
+    rng_enc, rng_dec, rng_motion_prior = jax.random.split(rng, 3)
 
     total_obs_size = sum(obs_sizes.values())
     proprio_size = obs_sizes["proprioception"]
 
     dummy_encoder_input = jnp.zeros((1, total_obs_size))
     dummy_decoder_input = jnp.zeros((1, latent_size + proprio_size))
-    dummy_prior_input = jnp.zeros((1, proprio_size))
+    dummy_motion_prior_input = jnp.zeros((1, proprio_size))
 
     encoder_params = encoder.init(rng_enc, dummy_encoder_input)
     decoder_params = decoder.init(rng_dec, dummy_decoder_input)
-    prior_params = prior.init(rng_prior, dummy_prior_input)
+    motion_prior_params = motion_prior.init(rng_motion_prior, dummy_motion_prior_input)
 
+    # Field name kept as 'prior' for checkpoint-key compat (see DistillNetworkParams).
     return DistillNetworkParams(
         encoder=encoder_params,
         decoder=decoder_params,
-        prior=prior_params,
+        prior=motion_prior_params,
     )
 
 
@@ -324,7 +332,7 @@ def make_logging_inference_fn(
     action_dist: distribution.ParametricDistribution,
     obs_sizes: Mapping[str, int],
     latent_size: int,
-    prior: DistillPrior | None = None,
+    motion_prior: DistillMotionPrior | None = None,
 ):
     """Create a logging policy factory where params are passed explicitly.
 
@@ -367,12 +375,14 @@ def make_logging_inference_fn(
                 "logits": logits,
             }
 
-            if prior is not None:
-                prior_mean, prior_logvar = prior.apply(
+            if motion_prior is not None:
+                # network_params.prior holds the motion-prior params; field
+                # name kept as 'prior' for checkpoint-key compat.
+                motion_prior_mean, motion_prior_logvar = motion_prior.apply(
                     network_params.prior, proprio_obs
                 )
-                extras["prior_mean"] = prior_mean
-                extras["prior_logvar"] = prior_logvar
+                extras["motion_prior_mean"] = motion_prior_mean
+                extras["motion_prior_logvar"] = motion_prior_logvar
 
             return jnp.array(action), extras
 
@@ -397,9 +407,11 @@ def create_compatible_checkpoint_params(
 
     Task transfer's checkpoint_utils.load_prior_checkpoint expects:
     (normalizer_params, {"params": {"encoder": ..., "decoder": ..., "prior": ...}})
+    The "prior" key here stores the motion-prior params; the key string is
+    kept for checkpoint-compat with task_transfer.
 
     The encoder in the checkpoint is a dummy (standard-shape intention_network.Encoder)
-    since task_transfer only uses prior + decoder.
+    since task_transfer only uses motion-prior + decoder.
 
     Returns:
         (normalizer_params, combined_params) tuple.
@@ -432,7 +444,7 @@ def create_abstract_distill_policy(
     action_size: int,
     encoder_hidden_layer_sizes: Sequence[int],
     decoder_hidden_layer_sizes: Sequence[int],
-    prior_hidden_layer_sizes: Sequence[int],
+    motion_prior_hidden_layer_sizes: Sequence[int],
 ) -> tuple:
     """Create abstract policy structure for checkpoint restoration.
 
@@ -449,20 +461,23 @@ def create_abstract_distill_policy(
     dec = intention_network.Decoder(
         layer_sizes=list(decoder_hidden_layer_sizes) + [action_param_size]
     )
-    pri = OriginalPrior(layer_sizes=list(prior_hidden_layer_sizes), latents=latent_size)
+    motion_pri = OriginalPrior(
+        layer_sizes=list(motion_prior_hidden_layer_sizes), latents=latent_size
+    )
 
     key = jax.random.PRNGKey(0)
     k1, k2, k3 = jax.random.split(key, 3)
 
     enc_init = enc.init(k1, jnp.zeros((1, reference_obs_size)))
     dec_init = dec.init(k2, jnp.zeros((1, latent_size + proprioceptive_obs_size)))
-    pri_init = pri.init(k3, jnp.zeros((1, proprioceptive_obs_size)))
+    motion_pri_init = motion_pri.init(k3, jnp.zeros((1, proprioceptive_obs_size)))
 
+    # Dict key 'prior' kept for checkpoint compat with task_transfer loaders.
     combined_params = {
         "params": {
             "encoder": enc_init["params"],
             "decoder": dec_init["params"],
-            "prior": pri_init["params"],
+            "prior": motion_pri_init["params"],
         }
     }
 

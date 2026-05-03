@@ -21,7 +21,7 @@ from jax import random
 from brax.training import distribution, types
 from brax.training.acme import running_statistics
 
-from scamper.agent.distill.distill_networks import DistillDecoder
+from scamper.agent.distill_expert.distill_networks import DistillDecoder
 from scamper.agent.mlp_prior.prior_networks import Prior as RGM
 from scamper.agent.mlp_prior.prior_rollout_eval import (
     check_termination_nan,

@@ -1,8 +1,8 @@
-"""Loss functions for DAgger distillation.
+"""Loss functions for DAgger distillation of the expert teacher.
 
 Three loss terms:
 - L_action: MSE between student and teacher action parameters
-- L_KL: KL(encoder || learned_prior) for diagonal Gaussians
+- L_KL: KL(encoder || motion prior) for diagonal Gaussians
 - L_AR1: Temporal smoothness of consecutive encoder means
 """
 
@@ -11,11 +11,11 @@ from typing import Any, Callable
 import jax
 import jax.numpy as jnp
 
-from scamper.agent.distill.distill_networks import (
+from scamper.agent.distill_expert.distill_networks import (
     DistillDecoder,
     DistillEncoder,
+    DistillMotionPrior,
     DistillNetworkParams,
-    DistillPrior,
     reparameterize,
 )
 from scamper.agent.observation_utils import (
@@ -41,13 +41,13 @@ def compute_action_matching_loss(
     return jnp.mean(jnp.square(student_action_params - teacher_action_params))
 
 
-def compute_encoder_prior_kl_loss(
+def compute_encoder_motion_prior_kl_loss(
     encoder_mean: jnp.ndarray,
     encoder_logvar: jnp.ndarray,
-    prior_mean: jnp.ndarray,
-    prior_logvar: jnp.ndarray,
+    motion_prior_mean: jnp.ndarray,
+    motion_prior_logvar: jnp.ndarray,
 ) -> jnp.ndarray:
-    """KL(encoder || prior) for diagonal Gaussians.
+    """KL(encoder || motion prior) for diagonal Gaussians.
 
     KL_j = 0.5 * (log(sig_p^2/sig_q^2) + sig_q^2/sig_p^2
                    + (mu_q - mu_p)^2/sig_p^2 - 1)
@@ -56,15 +56,17 @@ def compute_encoder_prior_kl_loss(
     Args:
         encoder_mean: [N, latent_dim]
         encoder_logvar: [N, latent_dim]
-        prior_mean: [N, latent_dim]
-        prior_logvar: [N, latent_dim]
+        motion_prior_mean: [N, latent_dim]
+        motion_prior_logvar: [N, latent_dim]
 
     Returns:
         Scalar KL divergence loss.
     """
-    log_var_diff = prior_logvar - encoder_logvar
-    var_ratio = jnp.exp(encoder_logvar - prior_logvar)
-    mean_diff_sq = jnp.square(encoder_mean - prior_mean) / jnp.exp(prior_logvar)
+    log_var_diff = motion_prior_logvar - encoder_logvar
+    var_ratio = jnp.exp(encoder_logvar - motion_prior_logvar)
+    mean_diff_sq = jnp.square(encoder_mean - motion_prior_mean) / jnp.exp(
+        motion_prior_logvar
+    )
 
     element_wise_kl = 0.5 * (log_var_diff + var_ratio + mean_diff_sq - 1)
     kl_per_sample = jnp.sum(element_wise_kl, axis=-1)
@@ -146,7 +148,7 @@ def compute_distill_loss(
     teacher_normalizer_params: DictRunningStatisticsState,
     encoder: DistillEncoder,
     decoder: DistillDecoder,
-    prior: DistillPrior,
+    motion_prior: DistillMotionPrior,
     kl_weight: float,
     ar1_weight: float,
     kl_schedule_fn: Callable | None,
@@ -162,7 +164,8 @@ def compute_distill_loss(
     then merge to [T*B, ...] for the main losses.
 
     Args:
-        params: Trainable DistillNetworkParams (encoder, decoder, prior).
+        params: Trainable DistillNetworkParams (encoder, decoder, motion-prior
+            stored under the ``prior`` field for checkpoint compat).
         normalizer_params: Student's observation normalizer.
         data: Transition data with shape [B, T].
         rng: Random key.
@@ -171,7 +174,7 @@ def compute_distill_loss(
         teacher_normalizer_params: Teacher's observation normalizer.
         encoder: DistillEncoder module.
         decoder: DistillDecoder module.
-        prior: DistillPrior module.
+        motion_prior: DistillMotionPrior module.
         kl_weight: Base weight for KL loss.
         ar1_weight: Base weight for AR(1) loss.
         kl_schedule_fn: Optional schedule for KL weight.
@@ -205,8 +208,10 @@ def compute_distill_loss(
     decoder_input = jnp.concatenate([z, proprio_obs], axis=-1)
     student_action_params, _ = decoder.apply(params.decoder, decoder_input)
 
-    # --- Prior forward pass ---
-    prior_mean, prior_logvar = prior.apply(params.prior, proprio_obs)
+    # --- Motion-prior forward pass (params.prior holds motion-prior weights) ---
+    motion_prior_mean, motion_prior_logvar = motion_prior.apply(
+        params.prior, proprio_obs
+    )
 
     # --- Teacher forward pass (frozen) ---
     teacher_normalized_obs = normalize_dict_obs(obs_flat, teacher_normalizer_params)
@@ -216,8 +221,8 @@ def compute_distill_loss(
     action_loss = compute_action_matching_loss(
         student_action_params, teacher_action_params
     )
-    kl_loss = compute_encoder_prior_kl_loss(
-        latent_mean, latent_logvar, prior_mean, prior_logvar
+    kl_loss = compute_encoder_motion_prior_kl_loss(
+        latent_mean, latent_logvar, motion_prior_mean, motion_prior_logvar
     )
 
     # AR(1) loss needs [T, B, D] shape
@@ -249,9 +254,11 @@ def compute_distill_loss(
         "ar1_loss": ar1_loss,
         "kl_weight": current_kl_weight,
         "ar1_weight": current_ar1_weight,
-        "mean_diff_l2": jnp.mean(jnp.linalg.norm(latent_mean - prior_mean, axis=-1)),
+        "mean_diff_l2": jnp.mean(
+            jnp.linalg.norm(latent_mean - motion_prior_mean, axis=-1)
+        ),
         "logvar_diff_l2": jnp.mean(
-            jnp.linalg.norm(latent_logvar - prior_logvar, axis=-1)
+            jnp.linalg.norm(latent_logvar - motion_prior_logvar, axis=-1)
         ),
     }
 

@@ -1,6 +1,6 @@
-"""DAgger-based distillation training loop.
+"""DAgger-based distillation training loop for the expert teacher.
 
-Student (encoder + decoder + prior) rolls out in the environment,
+Student (encoder + decoder + motion prior) rolls out in the environment,
 the frozen expert teacher annotates the collected states, and the student
 is trained via supervised learning through a variational information bottleneck.
 """
@@ -25,19 +25,22 @@ import optax
 import orbax.checkpoint as ocp
 
 from scamper.agent import checkpointing, gradients
-from scamper.agent.distill import losses as distill_losses
+from scamper.agent.distill_expert import losses as distill_losses
 from scamper.agent.mlp_prior import prior_rollout_eval
-from scamper.agent.distill.distill_networks import (
+from scamper.agent.distill_expert.distill_networks import (
     DistillDecoder,
     DistillEncoder,
+    DistillMotionPrior,
     DistillNetworkParams,
-    DistillPrior,
     create_compatible_checkpoint_params,
     init_distill_params,
     make_distill_networks,
     make_student_inference_fn,
 )
-from scamper.agent.distill.teacher import load_frozen_teacher, make_teacher_query_fn
+from scamper.agent.distill_expert.teacher import (
+    load_frozen_teacher,
+    make_teacher_query_fn,
+)
 from scamper.agent.expert.ppo_networks import (
     make_inference_fn as make_mlp_inference_fn,
     make_mlp_ppo_networks,
@@ -106,7 +109,7 @@ def train(
     latent_size: int = 16,
     encoder_hidden_layer_sizes: Tuple[int, ...] = (2048, 1024, 1024),
     decoder_hidden_layer_sizes: Tuple[int, ...] = (1024, 1024, 512),
-    prior_hidden_layer_sizes: Tuple[int, ...] = (1536, 1024, 512),
+    motion_prior_hidden_layer_sizes: Tuple[int, ...] = (1536, 1024, 512),
     clamp_logvar: bool = True,
     logvar_min: float = -5.0,
     logvar_max: float = 0.0,
@@ -126,7 +129,7 @@ def train(
         mp_wrapper.wrap_for_brax_training, full_reset=False
     ),
     hard_negative_mining: bool = True,
-    prior_rollout_config: Optional[dict] = None,
+    motion_prior_rollout_config: Optional[dict] = None,
 ):
     """DAgger distillation training.
 
@@ -243,25 +246,27 @@ def train(
             "intention_size": latent_size,
             "encoder_layer_sizes": list(encoder_hidden_layer_sizes),
             "decoder_layer_sizes": list(decoder_hidden_layer_sizes),
-            "prior_layer_sizes": list(prior_hidden_layer_sizes),
+            # Persisted dict key kept as 'prior_layer_sizes' for compat with
+            # existing checkpoints + downstream task_transfer config reads.
+            "prior_layer_sizes": list(motion_prior_hidden_layer_sizes),
         }
     )
 
     # --- Create student networks ---
-    encoder, decoder, prior, action_dist = make_distill_networks(
+    encoder, decoder, motion_prior, action_dist = make_distill_networks(
         obs_sizes=obs_sizes,
         action_size=action_size,
         latent_size=latent_size,
         encoder_hidden_layer_sizes=encoder_hidden_layer_sizes,
         decoder_hidden_layer_sizes=decoder_hidden_layer_sizes,
-        prior_hidden_layer_sizes=prior_hidden_layer_sizes,
+        motion_prior_hidden_layer_sizes=motion_prior_hidden_layer_sizes,
         clamp_logvar=clamp_logvar,
         logvar_min=logvar_min,
         logvar_max=logvar_max,
     )
 
     init_params = init_distill_params(
-        encoder, decoder, prior, obs_sizes, latent_size, key_networks
+        encoder, decoder, motion_prior, obs_sizes, latent_size, key_networks
     )
 
     # --- Create student policy for data collection ---
@@ -305,7 +310,7 @@ def train(
         teacher_normalizer_params=teacher_normalizer_params,
         encoder=encoder,
         decoder=decoder,
-        prior=prior,
+        motion_prior=motion_prior,
         kl_weight=kl_weight,
         ar1_weight=ar1_weight,
         kl_schedule_fn=kl_schedule_fn,
@@ -560,29 +565,34 @@ def train(
             encoder_hidden_layer_sizes=encoder_hidden_layer_sizes,
         )
 
-    # --- Initialize multi-mode prior rollout evaluator ---
+    # --- Initialize multi-mode motion-prior rollout evaluator ---
     multi_mode_evaluator = None
-    if prior_rollout_config is not None and prior_rollout_config.get("enabled", False):
-        logging.info("Initializing multi-mode prior rollout evaluator")
+    if motion_prior_rollout_config is not None and motion_prior_rollout_config.get(
+        "enabled", False
+    ):
+        logging.info("Initializing multi-mode motion-prior rollout evaluator")
         render_config = config_dict.get("render_config", {})
         proprio_size = obs_sizes["proprioception"]
 
         normalize = running_statistics.normalize
+        # The MultiModePriorRolloutEvaluator API (in scamper.agent.mlp_prior) takes
+        # `prior_hidden_layer_sizes` as the kwarg name; that's an external API and
+        # kept as-is. We pass our local motion_prior_hidden_layer_sizes through.
         multi_mode_evaluator = prior_rollout_eval.MultiModePriorRolloutEvaluator(
             env=environment,
             intention_latent_size=latent_size,
             action_size=action_size,
             proprioceptive_obs_size=proprio_size,
             decoder_hidden_layer_sizes=list(decoder_hidden_layer_sizes),
-            prior_hidden_layer_sizes=list(prior_hidden_layer_sizes),
+            prior_hidden_layer_sizes=list(motion_prior_hidden_layer_sizes),
             preprocess_observations_fn=normalize,
-            max_steps=prior_rollout_config.get("max_steps", 200),
-            eval_interval=prior_rollout_config.get("eval_interval", 1),
+            max_steps=motion_prior_rollout_config.get("max_steps", 200),
+            eval_interval=motion_prior_rollout_config.get("eval_interval", 1),
             render_fps=render_config.get("render_fps", 50),
             render_camera_name=render_config.get("render_camera_name", "close_profile"),
             model_path=str(ckpt_mgr.directory),
         )
-        logging.info("Multi-mode prior rollout evaluator initialized")
+        logging.info("Multi-mode motion-prior rollout evaluator initialized")
 
     # --- Get starting iteration ---
     start_it = 0
@@ -664,16 +674,18 @@ def train(
         # Generate shared reset key for all rollouts
         policy_params_fn_key, reset_key = jax.random.split(policy_params_fn_key)
 
-        # Run multi-mode prior rollout evaluation
+        # Run multi-mode motion-prior rollout evaluation
         if multi_mode_evaluator is not None:
-            prior_metrics = multi_mode_evaluator.run_evaluation(
+            motion_prior_metrics = multi_mode_evaluator.run_evaluation(
                 policy_params=policy_param,
                 eval_step=0,
                 reset_key=reset_key,
             )
-            if prior_metrics is not None:
-                metrics.update(prior_metrics)
-                logging.info(f"Initial prior rollout metrics: {prior_metrics}")
+            if motion_prior_metrics is not None:
+                metrics.update(motion_prior_metrics)
+                logging.info(
+                    f"Initial motion-prior rollout metrics: {motion_prior_metrics}"
+                )
 
         # Rollout logging callback
         _, policy_params_fn_key = jax.random.split(policy_params_fn_key)
@@ -761,16 +773,18 @@ def train(
             # Generate shared reset key for all rollouts
             policy_params_fn_key, reset_key = jax.random.split(policy_params_fn_key)
 
-            # Run multi-mode prior rollout evaluation
+            # Run multi-mode motion-prior rollout evaluation
             if multi_mode_evaluator is not None:
-                prior_metrics = multi_mode_evaluator.run_evaluation(
+                motion_prior_metrics = multi_mode_evaluator.run_evaluation(
                     policy_params=policy_param,
                     eval_step=it,
                     reset_key=reset_key,
                 )
-                if prior_metrics is not None:
-                    metrics.update(prior_metrics)
-                    logging.info(f"Prior rollout metrics: {prior_metrics}")
+                if motion_prior_metrics is not None:
+                    metrics.update(motion_prior_metrics)
+                    logging.info(
+                        f"Motion-prior rollout metrics: {motion_prior_metrics}"
+                    )
 
             # Rollout logging callback
             _, policy_params_fn_key = jax.random.split(policy_params_fn_key)
