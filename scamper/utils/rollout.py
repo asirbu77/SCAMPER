@@ -1,6 +1,6 @@
-"""Rollout generation utilities for VNL imitation learning environments.
+"""Rollout generation utilities for imitation learning environments.
 
-This module provides functions to create VNL environments and generate policy
+This module provides functions to create environments and generate policy
 rollouts with optional logging of activations, metrics, and sensor data.
 Rollouts can be used for evaluation, visualization, or data collection.
 """
@@ -16,9 +16,9 @@ from scamper.environment.rodent import imitation
 
 
 def create_environment(cfg_dict: dict[str, Any] | DictConfig) -> mjx_env.MjxEnv:
-    """Create a VNL imitation learning environment from a configuration.
+    """Create an imitation learning environment from a configuration.
 
-    Creates the VNL Imitation environment directly, returning dictionary
+    Creates the Imitation environment directly, returning dictionary
     observations with keys "imitation_target" and "proprioception".
 
     Args:
@@ -62,7 +62,7 @@ def create_rollout_generator(
         cfg: Full configuration dict containing env_config with timing parameters
             (mocap_hz, ctrl_dt, clip_length) and network_config with arch_name,
             obs_sizes, and architecture hyperparameters.
-        env: The VNL environment to run rollouts in.
+        env: The environment to run rollouts in.
         inference_fn: Policy function with signature (obs, rng) -> (action, extras).
             The extras dict should contain "activations" if log_activations=True.
         log_full_states: If True, include full State objects in the rollout output.

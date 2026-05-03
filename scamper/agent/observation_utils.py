@@ -71,8 +71,8 @@ def _flatten_nested_obs(nested: Any) -> jnp.ndarray:
 def flatten_obs_dict(obs: Mapping[str, Any]) -> dict[str, jnp.ndarray]:
     """Flatten each top-level key in an observation dict, preserving batch dim.
 
-    Converts nested observation structures (e.g., from vnl_playground)
-    to flat arrays at each key, suitable for normalization and network input.
+    Converts nested observation structures to flat arrays at each key,
+    suitable for normalization and network input.
     Preserves the batch dimension if present.
 
     Args:

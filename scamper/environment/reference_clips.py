@@ -6,7 +6,7 @@ provides a consistent API regardless of the underlying data structure.
 
 Supported H5 Formats
 --------------------
-1. **Named-array format** (preferred, used by fruitfly):
+1. **Named-array format** (preferred):
    - Root state: `position`, `velocity`, `quaternion`, `angular_velocity`
    - Joint state: `joints`, `joints_velocity`
    - Body state: `body_positions`, `body_quaternions`
@@ -197,7 +197,7 @@ class ReferenceClips:
         joint_names: Optional[list[str]],
         body_names: Optional[list[str]],
     ) -> None:
-        """Load named-array format (fruitfly-style)."""
+        """Load named-array format."""
         self._is_legacy_format = False
 
         for k in self._NAMED_ARRAYS:

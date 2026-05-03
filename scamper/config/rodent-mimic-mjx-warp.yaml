@@ -1,12 +1,12 @@
 # =============================================================================
 # Rodent Mimic-MJX (imitation) Configuration
 # =============================================================================
-# Configuration for training a Virtual Neuroscience Lab (VNL) rodent tracking
-# agent using PPO. This config trains on the full set of motion capture clips.
+# Configuration for training a rodent tracking agent using PPO.
+# This config trains on the full set of motion capture clips.
 # =============================================================================
 
 # =============================================================================
-# VNL Environment Configuration
+# Environment Configuration
 # =============================================================================
 # Settings for the MuJoCo simulation environment and imitation learning task.
 env_config:

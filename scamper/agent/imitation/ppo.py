@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Proximal Policy Optimization (PPO) training for VNL imitation learning.
+"""Proximal Policy Optimization (PPO) training for imitation learning.
 
 This module implements PPO training with support for:
 - Intention-based policy networks (VAE-style latent encoding)
@@ -21,7 +21,7 @@ This module implements PPO training with support for:
 - Train/test split evaluation
 - KL divergence scheduling for VAE training stability
 
-Based on Brax's PPO implementation with modifications for VNL tracking tasks.
+Based on Brax's PPO implementation with modifications for tracking tasks.
 """
 
 import functools

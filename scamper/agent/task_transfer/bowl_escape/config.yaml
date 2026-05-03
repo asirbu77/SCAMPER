@@ -70,7 +70,7 @@ env:
   mujoco_impl: "jax"  # 'jax' or 'warp'
   # Sliding friction for bowl heightfield (MuJoCo default is 1.0, rodent paws have 1.5)
   hfield_friction: 1.0
-  # Reward term weights (from vnl_playground bowl_escape task)
+  # Reward term weights
   reward_weights:
     escape: 1.0
     escape_bonus: 500.0
@@ -88,7 +88,7 @@ checkpointing:
 
 # Logging settings
 logging:
-  project: "vnl-playground"
+  project: "SCAMPER"
   group_name: "bowl_escape_transfer"
   exp_name: "bowl_escape_transfer"
   render_camera: "close_profile-rodent"

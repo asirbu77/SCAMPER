@@ -14,7 +14,7 @@ teacher_config:
   checkpoint_step: null  # Specific step to load (null = latest)
 
 # =============================================================================
-# VNL Environment Configuration
+# Environment Configuration
 # =============================================================================
 env_config:
   env_name: "RodentImitation"

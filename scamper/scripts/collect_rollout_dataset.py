@@ -68,7 +68,7 @@ from scamper.agent.observation_utils import (
     convert_flat_to_dict_normalizer,
     normalize_dict_obs,
 )
-from scamper.environment import wrappers as vnl_wrappers
+from scamper.environment import wrappers
 from scamper.environment.reference_clips import ReferenceClips
 from scamper.environment.rodent import imitation
 
@@ -219,13 +219,14 @@ def fix_config_paths(
             rel_path = path_str[path_str.index(ENV_MARKER) + len(ENV_MARKER) :]
             return os.path.join(env_root, rel_path)
 
-        # Legacy: old checkpoints with vnl_playground/tasks/ paths
-        VNL_MARKER = "vnl_playground/tasks/"
-        if VNL_MARKER in path_str:
+        LEGACY_TASKS_MARKER = "vnl_playground/tasks/"
+        if LEGACY_TASKS_MARKER in path_str:
             import scamper.environment
 
             env_root = str(Path(scamper.environment.__file__).parent)
-            rel_path = path_str[path_str.index(VNL_MARKER) + len(VNL_MARKER) :]
+            rel_path = path_str[
+                path_str.index(LEGACY_TASKS_MARKER) + len(LEGACY_TASKS_MARKER) :
+            ]
             return os.path.join(env_root, rel_path)
 
         # Any /tmp/<project>/... path: strip the prefix and resolve relative
@@ -286,7 +287,7 @@ def create_environment(cfg: Any) -> Tuple[Any, ReferenceClips]:
         keep_clips_idx=cfg.env_config.get("keep_clips_idx", None),
     )
 
-    env = vnl_wrappers.FlattenObsWrapper(
+    env = wrappers.FlattenObsWrapper(
         imitation.Imitation(config=env_cfg, clips=reference_clips)
     )
 

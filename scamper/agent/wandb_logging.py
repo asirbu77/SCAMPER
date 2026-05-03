@@ -38,7 +38,7 @@ def rollout_logging_fn(
     rendered video of the rollout.
 
     Args:
-        env: VNL environment instance with render() and _config attributes.
+        env: Environment instance with render() and _config attributes.
         jit_reset: JIT-compiled environment reset function.
         jit_step: JIT-compiled environment step function.
         cfg: Full configuration containing env_config and render_config.

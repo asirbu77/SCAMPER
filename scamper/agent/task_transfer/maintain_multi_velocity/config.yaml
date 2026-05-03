@@ -101,7 +101,7 @@ checkpointing:
 
 # Logging settings
 logging:
-  project: "vnl-playground"
+  project: "SCAMPER"
   group_name: "maintain_multi_velocity_transfer"
   exp_name: "maintain_multi_velocity_transfer"
   render_camera: "close_profile-rodent"
