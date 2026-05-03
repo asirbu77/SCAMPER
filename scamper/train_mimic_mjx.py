@@ -41,7 +41,7 @@ def _setup_environment() -> None:
     os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
-@hydra.main(version_base=None, config_path="config", config_name="rodent-mimic-mjx-jax")
+@hydra.main(version_base=None, config_path="config", config_name="mimic-mjx")
 def main(cfg: DictConfig) -> None:
     """Main training entry point using Hydra configs.
 

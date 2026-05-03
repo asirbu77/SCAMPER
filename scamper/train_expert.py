@@ -77,7 +77,7 @@ def mlp_rollout_logging_fn(
         wandb_logging._log_rollout_video(env, cfg, model_path, current_step, rollout)
 
 
-@hydra.main(version_base=None, config_path="config", config_name="rodent-expert-jax")
+@hydra.main(version_base=None, config_path="config", config_name="expert")
 def main(cfg: DictConfig) -> None:
     """Main training entry point for expert (MLP-policy) PPO training."""
     _setup_environment()

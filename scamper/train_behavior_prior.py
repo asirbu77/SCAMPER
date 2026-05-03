@@ -43,9 +43,7 @@ def _setup_environment() -> None:
     os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
-@hydra.main(
-    version_base=None, config_path="config", config_name="rodent-behavior-prior-jax"
-)
+@hydra.main(version_base=None, config_path="config", config_name="behavior-prior")
 def main(cfg: DictConfig):
     """Main function for behavior-prior network training using Hydra configs."""
 
