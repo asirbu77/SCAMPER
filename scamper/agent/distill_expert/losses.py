@@ -18,7 +18,7 @@ from scamper.agent.distill_expert.distill_networks import (
     DistillNetworkParams,
     reparameterize,
 )
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,
     normalize_dict_obs,

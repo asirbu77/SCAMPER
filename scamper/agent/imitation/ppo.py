@@ -43,9 +43,9 @@ from brax.training.types import Params, PRNGKey
 from mujoco_playground import wrapper as mp_wrapper
 from optax.transforms import freeze
 
-from scamper.agent import checkpointing, gradients, network_masks
+from scamper.utils import checkpointing, gradients, network_masks
 from scamper.agent.imitation import losses, ppo_networks
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,
     init_dict_normalizer,

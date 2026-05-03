@@ -19,7 +19,7 @@ from flax import linen as nn
 
 from scamper.agent.imitation import intention_network
 from scamper.agent.imitation.prior import Prior as OriginalPrior
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     normalize_dict_obs,
 )

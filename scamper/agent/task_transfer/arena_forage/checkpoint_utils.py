@@ -24,13 +24,13 @@ from brax.training import distribution
 from brax.training.acme import running_statistics, specs
 from omegaconf import DictConfig, OmegaConf
 
-from scamper.agent import checkpointing
+from scamper.utils import checkpointing
 from scamper.agent.behavior_prior.behavior_prior_networks import (
     create_abstract_behavior_prior_policy,
 )
 from scamper.agent.imitation import intention_network
 from scamper.agent.imitation.prior import Prior
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     convert_flat_to_dict_normalizer,
 )

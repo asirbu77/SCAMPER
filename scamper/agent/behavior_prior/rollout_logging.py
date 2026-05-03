@@ -26,7 +26,7 @@ from scamper.agent.distill_expert.distill_networks import (
 from scamper.agent.behavior_prior import behavior_prior_networks
 from scamper.agent.imitation.prior import compute_encoder_prior_kl_loss
 from scamper.agent.imitation.prior import Prior as BehaviorPrior
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     flatten_obs_dict,
     normalize_dict_obs,

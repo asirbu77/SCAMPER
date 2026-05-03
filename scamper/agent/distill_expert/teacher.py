@@ -16,7 +16,7 @@ from brax.training.acme import running_statistics, specs
 from omegaconf import OmegaConf
 
 from scamper.agent.expert.mlp_network import MLPPolicy
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,
     normalize_dict_obs,

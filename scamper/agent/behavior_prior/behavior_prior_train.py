@@ -24,12 +24,12 @@ from brax.training.acme import running_statistics
 from brax.training.acme import specs
 from brax.training.types import PRNGKey
 
-from scamper.agent import gradients
-from scamper.agent import checkpointing
+from scamper.utils import gradients
+from scamper.utils import checkpointing
 from scamper.agent.behavior_prior import losses
 from scamper.agent.behavior_prior import behavior_prior_networks
 from scamper.agent.behavior_prior import behavior_prior_rollout_eval
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,
     init_dict_normalizer,

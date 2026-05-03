@@ -24,10 +24,10 @@ from brax.training import distribution
 from brax.training.acme import running_statistics, specs
 from omegaconf import DictConfig, OmegaConf
 
-from scamper.agent import checkpointing
+from scamper.utils import checkpointing
 from scamper.agent.imitation import intention_network
 from scamper.agent.imitation.prior import Prior
-from scamper.agent.observation_utils import DictRunningStatisticsState
+from scamper.utils.observation_utils import DictRunningStatisticsState
 
 # Orbax step prefix for task transfer checkpoints
 _STEP_PREFIX = "TaskTransfer"

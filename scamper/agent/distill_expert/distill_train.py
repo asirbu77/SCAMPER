@@ -24,7 +24,7 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
-from scamper.agent import checkpointing, gradients
+from scamper.utils import checkpointing, gradients
 from scamper.agent.distill_expert import losses as distill_losses
 from scamper.agent.imitation import prior_rollout_eval
 from scamper.agent.distill_expert.distill_networks import (
@@ -45,7 +45,7 @@ from scamper.agent.expert.ppo_networks import (
     make_inference_fn as make_mlp_inference_fn,
     make_mlp_ppo_networks,
 )
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,
     init_dict_normalizer,

@@ -23,12 +23,12 @@ from omegaconf import DictConfig, OmegaConf
 from scamper.environment.reference_clips import ReferenceClips
 from scamper.environment.rodent import imitation
 
-from scamper.agent import checkpointing, wandb_logging
+from scamper.utils import checkpointing, wandb_logging
 from scamper.agent.distill_expert import distill_train
 from scamper.agent.distill_expert.rollout_logging import distill_rollout_logging_fn
 from scamper.agent.distill_expert.teacher import load_frozen_teacher
-from scamper.agent.domain_randomization import domain_randomization_maker
-from scamper.config import utils
+from scamper.utils.domain_randomization import domain_randomization_maker
+from scamper.utils import config_utils as utils
 
 
 def _setup_environment() -> None:

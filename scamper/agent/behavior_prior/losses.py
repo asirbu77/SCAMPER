@@ -17,7 +17,7 @@ from scamper.agent.imitation.prior import (
     compute_encoder_prior_kl_loss,
     create_ramp_schedule,
 )
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     normalize_dict_obs,
 )

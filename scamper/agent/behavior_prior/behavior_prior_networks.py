@@ -22,7 +22,7 @@ from brax.training.acme import running_statistics, specs
 from flax import linen as nn
 from omegaconf import OmegaConf
 
-from scamper.agent import checkpointing
+from scamper.utils import checkpointing
 from scamper.agent.distill_expert.distill_networks import (
     DistillDecoder,
     DistillEncoder,
@@ -34,7 +34,7 @@ from scamper.agent.distill_expert.distill_networks import (
 )
 from scamper.agent.distill_expert.distill_train import DistillTrainingState
 from scamper.agent.imitation.prior import Prior
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     flatten_obs_dict,
     normalize_dict_obs,

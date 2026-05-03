@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from brax.training import networks
 from flax import linen as nn
 
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,
     normalize_dict_obs,

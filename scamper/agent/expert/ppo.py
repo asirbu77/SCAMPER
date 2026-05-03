@@ -38,9 +38,9 @@ from brax.training.acme import running_statistics
 from brax.training.types import Params, PRNGKey
 from mujoco_playground import wrapper as mp_wrapper
 
-from scamper.agent import checkpointing, gradients
+from scamper.utils import checkpointing, gradients
 from scamper.agent.expert import losses, ppo_networks
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,
     init_dict_normalizer,

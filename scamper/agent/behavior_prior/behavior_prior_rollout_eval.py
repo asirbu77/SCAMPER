@@ -27,7 +27,7 @@ from scamper.agent.imitation.prior_rollout_eval import (
     compute_world_zaxis_termination,
     reparameterize,
 )
-from scamper.agent.observation_utils import DictRunningStatisticsState
+from scamper.utils.observation_utils import DictRunningStatisticsState
 
 
 def create_behavior_prior_policy(

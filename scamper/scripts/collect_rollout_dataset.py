@@ -62,7 +62,7 @@ from scamper.agent.imitation.prior_rollout_eval import (
     create_prior_policy,
     extract_prior_decoder_params,
 )
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,
     convert_flat_to_dict_normalizer,

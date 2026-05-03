@@ -24,13 +24,13 @@ from mujoco_playground import wrapper as playground_wrappers
 from omegaconf import DictConfig
 from scamper.environment import registry
 
-from scamper.config import utils
-from scamper.agent import checkpointing, wandb_logging
+from scamper.utils import config_utils as utils
+from scamper.utils import checkpointing, wandb_logging
 from scamper.agent.imitation import (
     ppo as imitation_ppo,
     ppo_networks as imitation_networks,
 )
-from scamper.agent.domain_randomization import domain_randomization_maker
+from scamper.utils.domain_randomization import domain_randomization_maker
 
 
 def _setup_environment() -> None:

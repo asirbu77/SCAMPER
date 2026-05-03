@@ -25,7 +25,7 @@ from jax import random
 
 from scamper.agent.imitation import intention_network
 from scamper.agent.imitation.prior import Prior
-from scamper.agent.observation_utils import DictRunningStatisticsState
+from scamper.utils.observation_utils import DictRunningStatisticsState
 
 
 def reparameterize(rng: jax.Array, mean: jax.Array, logvar: jax.Array) -> jax.Array:

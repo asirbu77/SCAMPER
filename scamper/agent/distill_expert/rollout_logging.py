@@ -16,7 +16,7 @@ from omegaconf import DictConfig
 from scamper.agent.distill_expert.distill_networks import (
     DistillNetworkParams,
 )
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     flatten_obs_dict,
     normalize_dict_obs,

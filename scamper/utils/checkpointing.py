@@ -27,7 +27,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from scamper.agent.imitation import losses as imitation_losses
 from scamper.agent.imitation import ppo_networks as imitation_networks
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     convert_flat_to_dict_normalizer,
     init_dict_normalizer,
 )
