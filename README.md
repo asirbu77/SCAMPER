@@ -1,195 +1,231 @@
 # SCAMPER
 
-This is a package for training control policies through motion imitation using deep reinforcement learning. Part of [MIMIC-MJX](https://mimic-mjx.talmolab.org/), along with [STAC-MJX](https://github.com/talmolab/stac-mjx) (a tool for performing inverse kinematics on markerless motion tracking data).
+SCAMPER trains physically-grounded control policies for biomechanical rodent
+models by combining motion-capture imitation, hierarchical distillation, and
+task-transfer reinforcement learning. The repository implements a four-stage
+pipeline — expert PPO → DAgger distillation into a VAE student → behavior-prior
+training → task-specific transfer — plus an alternate one-shot mimic-mjx PPO
+pipeline that skips distillation. Environments are built on
+[MuJoCo](https://github.com/google-deepmind/mujoco) /
+[mujoco_playground](https://github.com/google-deepmind/mujoco_playground), with
+training accelerated via [Brax](https://github.com/google/brax) PPO on JAX.
 
-## IMPORTANT (For reviewers and new users):
-**Please use the latest stable version of SCAMPER (v0.0.1) for notebook demos and running rodent training example.**
-
-## Prerelease (SCAMPER >= v1.0.0)
-**SCAMPER v1 will soon include all body models, related notebooks and training logic. SCAMPER v1 and on will rely on [vnl-playground](https://github.com/talmolab/vnl-playground) for the environment and task logic. vnl-playground will be installed during the following installation steps along with other needed libraries. For more information regarding the environment and task logic, please visit [vnl-playground](https://github.com/talmolab/vnl-playground).**
 
 ## Installation
 
-### Option 1: `uv` (fastest)
-
-#### Prerequisites
+### Prerequisites
 
 - Python 3.11 or 3.12
-- [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
-- CUDA 12.x or 13.x (for GPU support, optional)
+- A CUDA 12.x or 13.x toolchain (for GPU training; a CPU-only install also works
+  but is impractical for full training runs)
 
-#### Installing `uv`
-
-If you don't have uv installed:
+### 1. Install `uv`
 
 ```bash
-# Linux/macOS
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Or using pip
-pip install uv
 ```
 
-#### Installation Steps
+(Or install via your package manager: `brew install uv`, `pip install uv`,
+etc. See the [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/).)
 
-1. Clone the repository:
+### 2. Clone and create a virtual environment
+
 ```bash
 git clone https://github.com/asirbu77/SCAMPER.git
 cd SCAMPER
-```
-2. Create and activate a virtual environment:
-```bash
 uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-3. Install the package with optional dependencies based on your hardware. CUDA 12, CUDA 13, and CPU-only configurations are supported. This will take a few minutes:
-
-For CUDA 12.x:
-```bash
-uv pip install -e ".[cuda12]"
 ```
 
-For CUDA 13.x:
+### 3. Install the package (editable, with CUDA extras)
+
+Pick the CUDA extra that matches your driver:
+
 ```bash
+# CUDA 13.x
 uv pip install -e ".[cuda13]"
-```
 
-For CPU-only:
-```bash
+# CUDA 12.x
+uv pip install -e ".[cuda12]"
+
+# CPU-only
 uv pip install -e .
 ```
 
-For development, include the `[dev]` extras in addition to the hardware optional dependencies:
+The `-e` flag installs in editable mode so changes to the source tree take
+effect without reinstalling.
+
+### 4. Activate the venv
+
 ```bash
-uv pip install -e ".[cuda13,dev]"
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 ```
-4. Verify the installation:
+
+### 5. Verify
+
 ```bash
-python -c "import jax; print(f'JAX version: {jax.__version__}'); print(f'Available devices: {jax.devices()}')"
+python -c "import jax; print('JAX', jax.__version__, 'devices', jax.devices())"
 ```
-5. Register the environment as a Jupyter kernel:
+
+GPU installs should list `cuda` or `gpu` devices.
+
+
+## Download the data
+
+Reference motion-capture clips and pretrained checkpoints live in a
+HuggingFace dataset. Pull them into `./data` with:
+
 ```bash
-python -m ipykernel install --user --name=scamper --display-name="Python (scamper)"
+python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='sirbu/SCAMPER', repo_type='dataset', local_dir='./data')"
 ```
-6. Test the environment:
-    Execute the tests in [`notebooks/test_setup.ipynb`](notebooks/test_setup.ipynb). This will check if MuJoCo, GPU support and Jax appear to be working.
 
-#### Alternative: Using `pip`
 
-If you prefer using pip instead of uv:
+## Repository layout
+
+```
+scamper/
+├── train_expert.py              # Stage 1: expert MLP-policy PPO
+├── train_distill_expert.py      # Stage 2 (main): DAgger into VAE student
+├── train_behavior_prior.py      # Stage 3: behavior-prior on top of distill checkpoint
+├── train_mimic_mjx.py           # Alternate stage 2: end-to-end VAE PPO
+├── config/                      # Hydra configs (one per train script)
+├── agent/
+│   ├── expert/                  # Expert MLP networks + PPO
+│   ├── imitation/               # VAE intention networks + PPO + losses
+│   ├── distill_expert/          # DAgger distillation pieces
+│   ├── behavior_prior/          # Behavior-prior networks + losses
+│   └── task_transfer/           # arena_forage / maintain_velocity / walk_rear
+├── environment/                 # Rodent envs + reference-clip loader
+├── scripts/                     # Auxiliary scripts (rollout dataset, IS, ...)
+└── utils/                       # Checkpointing, observation utils, gradients,
+                                 # network masks, wandb logging, demo helpers
+notebooks/
+└── scamper_demo.ipynb           # End-to-end demo (rollouts + videos per stage)
+```
+
+
+## Training pipeline
+
+The full SCAMPER pipeline is three sequential stages. Each stage saves an Orbax
+checkpoint that the next stage consumes via `teacher_config.checkpoint_path`.
+
+### Stage 1: Expert (MLP-policy PPO)
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e ".[cuda13]"  # or cuda12/no optional deps
+python -m scamper.train_expert
 ```
 
-### Troubleshooting
+Trains a plain MLP policy to imitate reference clips via PPO. Saves under
+`step_prefix="PPONetwork"`. Override the default save path with
+`logging_config.model_path=...`.
 
-**CUDA version mismatch:**
-- Check your CUDA version: `nvcc --version` or `nvidia-smi`
-- Ensure you install the matching JAX CUDA version (cuda12 or cuda13)
+### Stage 2: Distill expert (DAgger into a VAE student)
 
-**Import errors:**
-- Verify the virtual environment is activated
-- Try reinstalling: `uv pip install --force-reinstall -e ".[cuda13]"`
-
-**GPU not detected:**
-- Verify CUDA installation: `nvidia-smi`
-- Check that JAX can see GPUs: `python -c "import jax; print(jax.devices())"`
-
-Expected output:
-- GPU: Should show `cuda` or `gpu` devices
-- CPU: Should show `cpu` device
-
-### Option 2: `conda`
-
-#### Installation steps
-
-1. Clone the repository:
-    ```bash
-    git clone https://github.com/asirbu77/SCAMPER.git && cd SCAMPER
-    ```
-2. Create a new development environment via `conda` (this will create the necessary base environment):
-    ```bash
-    conda env create -f environment.yml
-    ```
-3. Activate the environment:
-    ```bash
-    conda activate scamper
-    ```
-4. Install the package with desired CUDA version:
-    If your machine supports up to CUDA 13:
-    ```bash
-    pip install -e ".[cuda12]"
-    ```
-    If your machine supports up to CUDA 12:
-    ```bash
-    pip install -e ".[cuda13]"
-    ```
-    If your machine only has a CPU:
-    ```bash
-    pip install -e .
-    ```
-5. Test the environment:
-    Execute the tests in [`notebooks/test_setup.ipynb`](notebooks/test_setup.ipynb). This will check if MuJoCo, GPU support and Jax appear to be working.
-
-
-## Training
-
-### Rodent
-
-The main training entrypoint is defined in [`scamper/train.py`](scamper/train.py) and relies on the config in [`scamper/config/rodent-full-clips.yaml`](scamper/config/rodent-full-clips.yaml).
-
-#### Download the data
-
-To download data, run `notebooks/rodent_demo.ipynb`
-
-##### OR
-
-Execute the following command in terminal
 ```bash
-python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='talmolab/MIMIC-MJX', repo_type='dataset', filename='data/rodent/rodent_reference_clips.h5', local_dir='.')"
+python -m scamper.train_distill_expert \
+    teacher_config.checkpoint_path=/path/to/expert_checkpoint
 ```
 
-#### Run training:
+Distills the frozen expert teacher into a VAE student (encoder + decoder +
+motion prior) via online DAgger. Saves under `step_prefix="DistillNetwork"`.
 
-**Using uv:**
+### Stage 3: Behavior prior
+
 ```bash
-uv run python -m scamper.train --config-name rodent-full-clips.yaml
+python -m scamper.train_behavior_prior \
+    teacher_config.checkpoint_path=/path/to/distill_expert_checkpoint
 ```
 
-**Using conda:**
+Trains a behavior prior on top of the frozen distill_expert encoder / decoder /
+motion prior, using a KL loss. Saves under `step_prefix="DistillPriorNetwork"`.
+
+All entry points are Hydra apps; pass arbitrary config overrides on the
+command line (e.g., `train_setup.train_config.num_envs=4096`,
+`logging_config.exp_name=...`). The Hydra config files are in `scamper/config/`.
+
+
+## Task transfer
+
+After training (or instead of it, for `scratch`), transfer the policy to a
+downstream task by running the corresponding task-transfer entry point.
+
+### Tasks
+
+- `arena_forage` — collect treats scattered in an arena.
+- `maintain_velocity` — locomote at a target forward velocity.
+- `walk_rear` — walk to a target and rear up onto hind legs.
+
+### Modes (per task)
+
+| Task | `mimic_mjx` | `res_control` | `prior_gating` | `scratch` |
+|---|:---:|:---:|:---:|:---:|
+| `arena_forage`     | ✓ | ✓ | ✓ | ✓ |
+| `maintain_velocity`| ✓ | ✓ |   | ✓ |
+| `walk_rear`        | ✓ | ✓ |   | ✓ |
+
+- **`mimic_mjx`** — freeze the decoder; train a fresh task encoder over it
+  (input: a mimic-mjx checkpoint).
+- **`res_control`** — freeze the motion prior + decoder; train a residual
+  encoder on top (input: a distill_expert checkpoint).
+- **`prior_gating`** — freeze the motion prior, behavior prior, and decoder;
+  train a residual encoder + a gate that switches between priors (input: a
+  behavior_prior checkpoint).
+- **`scratch`** — train policy and decoder from random initialization; no
+  upstream checkpoint needed beyond config-shape inference.
+
+### CLI
+
 ```bash
-conda activate scamper
-python -m scamper.train --config-name rodent-full-clips.yaml
+# Generic form
+python -m scamper.agent.task_transfer.<task>.train \
+    mode=<mode> \
+    checkpoint.path=/path/to/upstream_checkpoint \
+    [checkpoint.step=<step>]
+
+# Examples
+python -m scamper.agent.task_transfer.maintain_velocity.train \
+    mode=res_control \
+    checkpoint.path=/path/to/distill_expert_checkpoint
+
+python -m scamper.agent.task_transfer.arena_forage.train \
+    mode=prior_gating \
+    checkpoint.path=/path/to/behavior_prior_checkpoint
+
+python -m scamper.agent.task_transfer.walk_rear.train mode=scratch
 ```
 
+Per-task Hydra configs live alongside each task at
+`scamper/agent/task_transfer/<task>/config.yaml`.
 
-## Citation
 
-If you use SCAMPER in your research, please cite our paper:
+## Mimic-MJX (alternate pipeline)
 
-```bibtex
-@misc{zhang2025mimicmjxneuromechanicalemulationanimal,
-      title={MIMIC-MJX: Neuromechanical Emulation of Animal Behavior},
-      author={Charles Y. Zhang and Yuanjia Yang and Aidan Sirbu and Elliott T. T. Abe and Emil Wärnberg and Eric J. Leonardis and Diego E. Aldarondo and Adam Lee and Aaditya Prasad and Jason Foat and Kaiwen Bian and Joshua Park and Rusham Bhatt and Hutton Saunders and Akira Nagamori and Ayesha R. Thanawalla and Kee Wui Huang and Fabian Plum and Hendrik K. Beck and Steven W. Flavell and David Labonte and Blake A. Richards and Bingni W. Brunton and Eiman Azim and Bence P. Ölveczky and Talmo D. Pereira},
-      year={2025},
-      eprint={2511.20532},
-      archivePrefix={arXiv},
-      primaryClass={q-bio.NC},
-      url={https://arxiv.org/abs/2511.20532},
-}
+Skip distillation and train the encoder + decoder end-to-end via PPO:
+
+```bash
+python -m scamper.train_mimic_mjx
 ```
 
+The resulting checkpoint plugs into task transfer's `mimic_mjx` mode in place
+of a distill_expert teacher.
 
+
+## Demo notebook
+
+[`notebooks/scamper_demo.ipynb`](notebooks/scamper_demo.ipynb) walks through
+each stage with cached rollouts and rendered videos: imitation grid, behavior
+prior, motion prior (low/high noise), and per-task transfer comparisons across
+SCAMPER / MIMIC-MJX / scratch checkpoints. It's the fastest way to see what
+each pipeline stage produces.
 
 
 ## License
-This package is distributed under the Apache License, Version 2.0. See
-[`LICENSE`](https://github.com/asirbu77/SCAMPER/blob/main/LICENSE) for details.
+
+Distributed under the Apache License, Version 2.0. See
+[`LICENSE`](LICENSE) for the full text.
 
 Some files are derived from upstream projects and retain their original
 Apache 2.0 copyright notices:
+
 - [Brax](https://github.com/google/brax): `scamper/utils/gradients.py`,
   `scamper/agent/imitation/ppo.py`, `scamper/agent/imitation/losses.py`,
   `scamper/agent/expert/ppo.py`.
