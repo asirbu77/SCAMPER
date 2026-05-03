@@ -11,8 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
-"""Domain randomization for the Go1 environment."""
+#
+# Modifications copyright 2026 SCAMPER authors. Adapted from the mujoco_playground
+# Go1 domain-randomization helper for use with the rodent walker.
+
+"""Domain randomization for the rodent walker."""
 
 import jax
 from mujoco import mjx

@@ -1,8 +1,4 @@
-"""Configuration utilities for scamper training pipelines.
-
-This module provides helper functions for preparing and updating OmegaConf
-configurations, including walker-specific path resolution and config merging.
-"""
+"""OmegaConf helpers: walker path resolution, config merging."""
 
 import json
 import logging

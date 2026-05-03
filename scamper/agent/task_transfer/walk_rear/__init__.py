@@ -7,10 +7,8 @@ Three training modes:
 
 Supports Orbax checkpointing and SLURM preemption recovery.
 
-Note: Do not add imports here that trigger mujoco imports.
-The MUJOCO_GL environment variable must be set before mujoco is imported,
-which happens in train.py. Adding imports here would cause mujoco to be
-imported before train.py can set the environment variable.
+Do not add imports here that pull in mujoco. ``MUJOCO_GL`` must be set before
+mujoco is first imported, which happens in train.py.
 """
 
 __all__ = [

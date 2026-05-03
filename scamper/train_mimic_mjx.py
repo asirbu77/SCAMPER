@@ -1,9 +1,8 @@
-"""Entry point for SCAMPER mimic-mjx (imitation) training.
+"""Mimic-MJX (imitation) training entry point.
 
-Trains a VAE-style imitation network (encoder + decoder) via PPO. The saved
-checkpoint structure under step_prefix="PPONetwork" is the input that
-downstream stages (distill_expert, behavior_prior, task_transfer decoder_only)
-consume.
+Trains a VAE-style encoder+decoder via PPO and saves under
+``step_prefix="PPONetwork"`` for use by distill_expert, behavior_prior, and
+task_transfer.
 """
 
 import os
@@ -43,15 +42,7 @@ def _setup_environment() -> None:
 
 @hydra.main(version_base=None, config_path="config", config_name="mimic-mjx")
 def main(cfg: DictConfig) -> None:
-    """Main training entry point using Hydra configs.
-
-    Initializes JAX devices, loads reference clips, creates train/test
-    environments, and runs PPO training with wandb logging.
-
-    Args:
-        cfg: Hydra configuration containing env_config, network_config,
-            train_setup, and logging_config.
-    """
+    """Run PPO imitation training from a Hydra config."""
     _setup_environment()
 
     try:
@@ -61,24 +52,20 @@ def main(cfg: DictConfig) -> None:
         n_devices = 1
         logging.info("Not using GPUs")
 
-    # Prepare config BEFORE load_from_run_state so the config hash is consistent
-    # between discovery and saving (prepare_config modifies cfg by adding paths)
+    # prepare_config must run before load_from_run_state so the run-state
+    # config hash matches between discovery and saving.
     cfg, cfg_dict, env_cfg_ml = utils.prepare_config(cfg)
 
-    # Get environment name from config
     env_name = cfg.env_config.env_name
 
-    # Determine how to load from checkpoint
     run_id, checkpoint_path, existing_run_state = checkpointing.load_from_run_state(cfg)
 
-    # Initialize checkpoint manager
     mgr_options = ocp.CheckpointManagerOptions(
         create=True,
         step_prefix="PPONetwork",
     )
     ckpt_mgr = ocp.CheckpointManager(checkpoint_path, options=mgr_options)
 
-    # Create the reference clips using registry
     logging.info(f"Loading data: {cfg.env_config.reference_data_path}")
     reference_clips = registry.load_reference_clips(
         env_name,
@@ -86,7 +73,6 @@ def main(cfg: DictConfig) -> None:
         n_frames_per_clip=cfg.env_config.clip_length,
         keep_clips_idx=cfg.env_config.keep_clips_idx,
     )
-    # Create train/test split
     key_split, _ = jax.random.split(
         jax.random.PRNGKey(cfg.train_setup.train_config.seed)
     )
@@ -94,7 +80,6 @@ def main(cfg: DictConfig) -> None:
         train_ratio=cfg.train_setup.train_subset_ratio,
         seed=key_split,
     )
-    # Create environments using registry
     env = registry.load(
         env_name, config=env_cfg_ml, clips=train_clips, flatten_obs=False
     )
@@ -104,7 +89,7 @@ def main(cfg: DictConfig) -> None:
 
     logging.info(f"Environment config: {cfg.env_config}")
 
-    # Episode length is equal to (clip length - random init range - traj length) * steps per cur frame.
+    # episode_length = (clip_length - init_range - traj_length) * steps_per_frame
     steps_per_frame = (1 / cfg.env_config.mocap_hz) / (cfg.env_config.ctrl_dt)
     episode_length = (
         cfg.env_config.clip_length
@@ -113,9 +98,6 @@ def main(cfg: DictConfig) -> None:
     ) * steps_per_frame
     logging.info(f"episode_length {episode_length}")
 
-    logging.info("Using PPO Pipeline with intention network")
-
-    # Create intention network factory
     network_factory = functools.partial(
         imitation_networks.make_intention_ppo_networks,
         intention_latent_size=cfg.network_config.intention_size,
@@ -127,7 +109,6 @@ def main(cfg: DictConfig) -> None:
         ),
     )
 
-    # Determine wandb run ID for resuming
     wandb_logging.initialize_wandb_logging(
         logging_cfg=cfg.logging_config,
         cfg=cfg,
@@ -135,8 +116,8 @@ def main(cfg: DictConfig) -> None:
         existing_run_state=existing_run_state,
     )
 
-    # Save run state after wandb initialization (always, so the current job
-    # has a run state file even when restoring from a different job's state)
+    # Always write run state after wandb init, so the current job has its own
+    # run-state file even when restoring from a different job's state.
     checkpointing.save_run_state(
         cfg=cfg,
         run_id=run_id,
@@ -144,7 +125,6 @@ def main(cfg: DictConfig) -> None:
         wandb_run_id=wandb.run.id,
     )
 
-    # Create the checkpoint callback with the correct wandb_run_id
     checkpoint_callback = checkpointing.create_checkpoint_callback(
         cfg=cfg,
         run_id=run_id,
@@ -152,7 +132,6 @@ def main(cfg: DictConfig) -> None:
         wandb_run_id=wandb.run.id,
     )
 
-    # Build training arguments
     train_kwargs = dict(
         **cfg.train_setup.train_config,
         num_evals=int(
@@ -190,14 +169,13 @@ def main(cfg: DictConfig) -> None:
 
     train_fn = functools.partial(imitation_ppo.train, **train_kwargs)
 
-    # Set the render env start frame to always be 0
+    # Render env always starts at frame 0 of each clip.
     rollout_cfg = env_cfg_ml.copy_and_resolve_references()
     rollout_cfg.start_frame_range = [0, 0]
     rollout_env = registry.load(
         env_name, config=rollout_cfg, clips=None, flatten_obs=False
     )
 
-    # define the jit reset/step functions
     jit_reset = jax.jit(rollout_env.reset)
     jit_step = jax.jit(rollout_env.step)
     policy_params_fn = functools.partial(
@@ -215,10 +193,9 @@ def main(cfg: DictConfig) -> None:
         policy_params_fn=policy_params_fn,
     )
 
-    # Clean up run state after successful completion
     try:
         checkpointing.cleanup_run_state(cfg)
-        logging.info("Training completed successfully, cleaned up run state")
+        logging.info("Training completed, run state cleaned up")
     except Exception as e:
         logging.warning(f"Failed to cleanup run state: {e}")
 

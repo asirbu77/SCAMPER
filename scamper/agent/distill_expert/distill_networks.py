@@ -24,9 +24,7 @@ from scamper.utils.observation_utils import (
     normalize_dict_obs,
 )
 
-# ---------------------------------------------------------------------------
 # Network modules
-# ---------------------------------------------------------------------------
 
 
 class DistillEncoder(nn.Module):
@@ -144,9 +142,7 @@ class DistillMotionPrior(nn.Module):
         return mean, logvar
 
 
-# ---------------------------------------------------------------------------
 # Params container
-# ---------------------------------------------------------------------------
 
 
 @flax.struct.dataclass
@@ -162,9 +158,7 @@ class DistillNetworkParams:
     prior: types.Params
 
 
-# ---------------------------------------------------------------------------
 # Reparameterization
-# ---------------------------------------------------------------------------
 
 
 def reparameterize(
@@ -176,9 +170,7 @@ def reparameterize(
     return mean + eps * std
 
 
-# ---------------------------------------------------------------------------
 # Factory functions
-# ---------------------------------------------------------------------------
 
 
 def make_distill_networks(
@@ -260,9 +252,7 @@ def init_distill_params(
     )
 
 
-# ---------------------------------------------------------------------------
 # Student inference function (for environment rollout)
-# ---------------------------------------------------------------------------
 
 
 def make_student_inference_fn(
@@ -391,9 +381,7 @@ def make_logging_inference_fn(
     return make_logging_policy
 
 
-# ---------------------------------------------------------------------------
 # Checkpoint compatibility
-# ---------------------------------------------------------------------------
 
 
 def create_compatible_checkpoint_params(

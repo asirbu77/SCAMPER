@@ -11,6 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Modifications copyright 2026 SCAMPER authors. Adapted from Brax PPO with
+# latent/VAE machinery removed, plus SLURM preemption-recovery checkpointing.
 
 """PPO training for the expert (MLP-policy) trainer.
 

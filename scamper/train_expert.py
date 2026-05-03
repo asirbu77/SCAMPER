@@ -1,4 +1,4 @@
-"""Entry point for SCAMPER expert (MLP-policy) PPO training."""
+"""Expert (MLP-policy) PPO training entry point."""
 
 import os
 
@@ -49,17 +49,12 @@ def mlp_rollout_logging_fn(
     render_video=True,
     ppo_network=None,
 ):
-    """Log evaluation rollout metrics and video to W&B (no latent logging).
-
-    Simplified version of wandb_logging.rollout_logging_fn that skips
-    latent space statistics since the expert MLP policy has no latent bottleneck.
-    """
+    """Eval rollout + video for the MLP expert (no latent stats)."""
     _, reset_rng, act_rng = jax.random.split(policy_params_fn_key, 3)
     state = jit_reset(reset_rng)
 
     rollout = [state]
 
-    # Calculate episode length from config
     physics_steps_per_ctrl = cfg.env_config.ctrl_dt / cfg.env_config.sim_dt
     steps_per_mocap_frame = (1 / cfg.env_config.mocap_hz) / (
         cfg.env_config.sim_dt * physics_steps_per_ctrl
@@ -79,7 +74,7 @@ def mlp_rollout_logging_fn(
 
 @hydra.main(version_base=None, config_path="config", config_name="expert")
 def main(cfg: DictConfig) -> None:
-    """Main training entry point for expert (MLP-policy) PPO training."""
+    """Run PPO expert training from a Hydra config."""
     _setup_environment()
 
     try:
@@ -131,8 +126,6 @@ def main(cfg: DictConfig) -> None:
         - cfg.env_config.reference_length
     ) * steps_per_frame
     logging.info(f"episode_length {episode_length}")
-
-    logging.info("Using PPO Pipeline with MLP network")
 
     network_factory = functools.partial(
         expert_networks.make_mlp_ppo_networks,
@@ -194,7 +187,7 @@ def main(cfg: DictConfig) -> None:
 
     train_fn = functools.partial(expert_ppo.train, **train_kwargs)
 
-    # Set the render env start frame to always be 0
+    # Render env always starts at frame 0 of each clip.
     rollout_cfg = env_cfg_ml.copy_and_resolve_references()
     rollout_cfg.start_frame_range = [0, 0]
     rollout_env = registry.load(
@@ -218,10 +211,9 @@ def main(cfg: DictConfig) -> None:
         policy_params_fn=policy_params_fn,
     )
 
-    # Clean up run state after successful completion
     try:
         checkpointing.cleanup_run_state(cfg)
-        logging.info("Training completed successfully, cleaned up run state")
+        logging.info("Training completed, run state cleaned up")
     except Exception as e:
         logging.warning(f"Failed to cleanup run state: {e}")
 

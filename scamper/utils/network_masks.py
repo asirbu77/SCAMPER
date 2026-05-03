@@ -1,9 +1,4 @@
-"""Parameter masks for selective network freezing during training.
-
-This module provides utilities for creating boolean masks over network parameters,
-enabling selective freezing of network components (e.g., freeze encoder while
-training decoder, or vice versa).
-"""
+"""Boolean parameter masks for selectively freezing network components."""
 
 import copy
 from typing import Any

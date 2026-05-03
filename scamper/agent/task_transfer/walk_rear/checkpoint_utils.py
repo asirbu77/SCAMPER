@@ -1,12 +1,6 @@
-"""Checkpoint utilities for task transfer training.
-
-This module provides functions to:
-- Load prior, decoder, and encoder parameters from mlp_prior checkpoints
-- Create inference functions for the frozen prior and decoder networks
-- Save and load task transfer training checkpoints (frozen networks + PPO state)
-- Manage run state files for SLURM preemption recovery
-
-Only supports dict normalizer format (no legacy flat format).
+"""Walk-rear task-transfer checkpoint helpers: load frozen upstream networks,
+build inference fns, save/restore the task-transfer checkpoint, manage run-state
+files for SLURM preemption recovery. Dict normalizer format only.
 """
 
 import hashlib
@@ -401,9 +395,7 @@ def make_prior_inference_fn(
     return prior_fn
 
 
-# ---------------------------------------------------------------------------
 # Task transfer checkpointing and preemption recovery
-# ---------------------------------------------------------------------------
 
 
 def hash_task_transfer_config(cfg: DictConfig) -> str:

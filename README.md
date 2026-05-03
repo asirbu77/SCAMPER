@@ -185,5 +185,13 @@ If you use SCAMPER in your research, please cite our paper:
 
 
 ## License
-This package is distributed under a BSD 3-Clause License and can be used without
-restrictions. See [`LICENSE`](https://github.com/asirbu77/SCAMPER/blob/main/LICENSE) for details.
+This package is distributed under the Apache License, Version 2.0. See
+[`LICENSE`](https://github.com/asirbu77/SCAMPER/blob/main/LICENSE) for details.
+
+Some files are derived from upstream projects and retain their original
+Apache 2.0 copyright notices:
+- [Brax](https://github.com/google/brax): `scamper/utils/gradients.py`,
+  `scamper/agent/imitation/ppo.py`, `scamper/agent/imitation/losses.py`,
+  `scamper/agent/expert/ppo.py`.
+- [mujoco_playground](https://github.com/google-deepmind/mujoco_playground)
+  (DeepMind): `scamper/utils/domain_randomization.py`.

@@ -1,18 +1,6 @@
-"""Intention network architectures for VAE-style imitation learning.
-
-This module provides encoder-decoder neural network architectures.
-The key components are:
-
-- Encoder: Maps reference trajectory observations to a latent intention space
-- Decoder: Maps latent intentions + proprioceptive state to action parameters
-- IntentionNetwork: Full VAE combining encoder and decoder with reparameterization
-
-The architecture enables learning from motion capture data by encoding trajectory
-information into a compact latent space that conditions the policy.
-
-Observations are expected as dictionaries with keys:
-- "imitation_target": Reference trajectory observations (flat array)
-- "proprioception": Proprioceptive state observations (flat array)
+"""VAE-style intention network: encoder over imitation_target, decoder over
+latent + proprioception. Observations are dicts with keys ``imitation_target``
+and ``proprioception``.
 """
 
 from collections.abc import Mapping, Sequence

@@ -1,16 +1,5 @@
-"""PPO network definitions for intention-based imitation learning.
-
-This module provides network architectures for PPO training with VAE-style
-intention encoding.
-
-The key components are:
-- PPOImitationNetworks: Container for policy, value, and action distribution
-- Inference functions that route observations through encoder/decoder
-- Factory functions for creating intention-based PPO networks
-
-Observations are expected as dictionaries with keys:
-- "imitation_target": Reference trajectory observations (flat array)
-- "proprioception": Proprioceptive state observations (flat array)
+"""PPO networks for intention-based imitation: policy + value + action dist.
+Observations are dicts with ``imitation_target`` / ``proprioception`` keys.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -330,8 +319,8 @@ def make_decoder_policy_fn(
         step: Checkpoint step to load. If None, loads latest.
 
     Returns:
-        Policy function: (obs) -> (action, extras).
-        Note: This policy is deterministic (returns mode of action distribution).
+        Deterministic policy function ``(obs) -> (action, extras)`` that
+        returns the mode of the action distribution.
     """
 
     def make_decoder_policy(

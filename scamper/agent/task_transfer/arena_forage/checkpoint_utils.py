@@ -1,12 +1,7 @@
-"""Checkpoint utilities for task transfer training.
-
-This module provides functions to:
-- Load prior, decoder, and encoder parameters from mlp_prior checkpoints
-- Create inference functions for the frozen prior and decoder networks
-- Save and load task transfer training checkpoints (frozen networks + PPO state)
-- Manage run state files for SLURM preemption recovery
-
-Handles both legacy flat normalizer format and new dict normalizer format.
+"""Arena-forage task-transfer checkpoint helpers: load frozen upstream networks,
+build inference fns, save/restore the task-transfer checkpoint, manage run-state
+files for SLURM preemption recovery. Handles both legacy flat and dict
+normalizer formats.
 """
 
 import hashlib
@@ -708,9 +703,7 @@ def make_behavior_prior_inference_fn(
     return behavior_prior_fn
 
 
-# ---------------------------------------------------------------------------
 # Task transfer checkpointing and preemption recovery
-# ---------------------------------------------------------------------------
 
 
 def hash_task_transfer_config(cfg: DictConfig) -> str:

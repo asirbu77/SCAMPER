@@ -1,7 +1,7 @@
-"""Entry point for DAgger distillation of the expert teacher.
+"""DAgger distillation of the expert teacher into a VAE student.
 
-Distills a trained expert teacher into a VAE student (encoder +
-decoder + motion prior) using online distillation (DAgger).
+Online distillation: rolls out the student, queries the teacher on those
+states, and trains the student (encoder + decoder + motion prior) to match.
 """
 
 import os
@@ -41,8 +41,7 @@ def _setup_environment() -> None:
 
 @hydra.main(version_base=None, config_path="config", config_name="distill-expert")
 def main(cfg: DictConfig):
-    """Main function for DAgger distillation of the expert teacher."""
-
+    """Run DAgger distillation from a Hydra config."""
     _setup_environment()
 
     try:
@@ -52,35 +51,31 @@ def main(cfg: DictConfig):
         n_devices = 1
         logging.info("Not using GPUs")
 
-    # Validate teacher config
     if cfg.teacher_config.checkpoint_path is None:
         raise ValueError(
             "teacher_config.checkpoint_path must be specified for distillation"
         )
 
-    # Prepare config BEFORE load_from_run_state so the config hash is consistent
+    # prepare_config must run before load_from_run_state so the run-state
+    # config hash matches between discovery and saving.
     cfg, cfg_dict, env_cfg_ml = utils.prepare_config(cfg)
 
-    # Determine how to load from checkpoint
     run_id, checkpoint_path, existing_run_state = (
         checkpointing.load_from_run_state_distill(cfg)
     )
 
-    # Initialize checkpoint manager with DistillNetwork prefix
     mgr_options = ocp.CheckpointManagerOptions(
         create=True,
         step_prefix="DistillNetwork",
     )
     ckpt_mgr = ocp.CheckpointManager(checkpoint_path, options=mgr_options)
 
-    # Create the reference clips
     logging.info(f"Loading data: {cfg.env_config.reference_data_path}")
     reference_clips = ReferenceClips(
         data_path=cfg.env_config.reference_data_path,
         n_frames_per_clip=cfg.env_config.clip_length,
         keep_clips_idx=cfg.env_config.keep_clips_idx,
     )
-    # Create train/test split
     key_split, _ = jax.random.split(
         jax.random.PRNGKey(cfg.train_setup.train_config.seed)
     )
@@ -88,17 +83,15 @@ def main(cfg: DictConfig):
         train_ratio=cfg.train_setup.train_subset_ratio,
         seed=key_split,
     )
-    # Compute naconmax for warp backend
+    # naconmax = nconmax * num_envs for the warp backend.
     if hasattr(env_cfg_ml, "nconmax"):
         env_cfg_ml.naconmax = env_cfg_ml.nconmax * cfg.train_setup.train_config.num_envs
 
-    # Create environments
     env = imitation.Imitation(config=env_cfg_ml, clips=train_clips)
     test_env = imitation.Imitation(config=env_cfg_ml, clips=test_clips)
 
     logging.info(f"Environment config: {cfg.env_config}")
 
-    # Episode length
     steps_per_frame = (1 / cfg.env_config.mocap_hz) / cfg.env_config.ctrl_dt
     episode_length = (
         cfg.env_config.clip_length
@@ -107,16 +100,13 @@ def main(cfg: DictConfig):
     ) * steps_per_frame
     logging.info(f"episode_length {episode_length}")
 
-    logging.info("Using DAgger Distillation Pipeline")
-
-    # Load teacher to extract obs/action sizes for config
+    # Pull obs/action sizes from the frozen teacher.
     _, teacher_normalizer, teacher_cfg, _ = load_frozen_teacher(
         cfg.teacher_config.checkpoint_path,
         step=cfg.teacher_config.checkpoint_step,
     )
     teacher_net_cfg = teacher_cfg["network_config"]
 
-    # Update network config with teacher dimensions
     OmegaConf.set_struct(cfg.network_config, False)
     OmegaConf.update(
         cfg.network_config,
@@ -138,7 +128,6 @@ def main(cfg: DictConfig):
     )
     OmegaConf.set_struct(cfg.network_config, True)
 
-    # Initialize wandb logging
     wandb_logging.initialize_wandb_logging(
         logging_cfg=cfg.logging_config,
         cfg=cfg,
@@ -146,7 +135,6 @@ def main(cfg: DictConfig):
         existing_run_state=existing_run_state,
     )
 
-    # Save run state after wandb initialization
     checkpointing.save_run_state(
         cfg=cfg,
         run_id=run_id,
@@ -154,7 +142,6 @@ def main(cfg: DictConfig):
         wandb_run_id=wandb.run.id,
     )
 
-    # Create the checkpoint callback
     checkpoint_callback = checkpointing.create_checkpoint_callback(
         cfg=cfg,
         run_id=run_id,
@@ -162,10 +149,8 @@ def main(cfg: DictConfig):
         wandb_run_id=wandb.run.id,
     )
 
-    # Get distill config
     distill_cfg = cfg.distill_config
 
-    # Setup training function
     train_fn = functools.partial(
         distill_train.train,
         **cfg.train_setup.train_config,
@@ -232,7 +217,7 @@ def main(cfg: DictConfig):
         ),
     )
 
-    # Create rollout logging environment and function
+    # Render env always starts at frame 0 of each clip.
     rollout_cfg = env_cfg_ml.copy_and_resolve_references()
     rollout_cfg.start_frame_range = [0, 0]
     rollout_env = imitation.Imitation(config=rollout_cfg, clips=train_clips)
@@ -248,17 +233,15 @@ def main(cfg: DictConfig):
         checkpoint_path,
     )
 
-    # Run training
     make_inference_fn, params, _ = train_fn(
         environment=env,
         progress_fn=wandb_logging.wandb_progress,
         policy_params_fn=policy_params_fn,
     )
 
-    # Clean up run state after successful completion
     try:
         checkpointing.cleanup_run_state(cfg)
-        logging.info("Distillation completed successfully, cleaned up run state")
+        logging.info("Distillation completed, run state cleaned up")
     except Exception as e:
         logging.warning(f"Failed to cleanup run state: {e}")
 

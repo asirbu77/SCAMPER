@@ -1,13 +1,4 @@
-"""Utilities for handling dictionary observations.
-
-This module provides utilities for working with dictionary observations
-where each key maps to either a flat array or a nested dict of arrays.
-Key components:
-
-- DictRunningStatisticsState: Holds separate running stats for each observation key
-- Normalizer functions: init, update, and normalize for dict observations
-- Flattening utilities for nested observation structures
-"""
+"""Per-key running stats and helpers for dictionary observations."""
 
 from typing import Mapping, Any
 
@@ -188,11 +179,9 @@ def normalize_dict_obs(
 def concat_flat_dict_obs(obs: Mapping[str, jnp.ndarray]) -> jnp.ndarray:
     """Concatenate flat observation dict to single array.
 
-    Concatenates imitation_target and proprioception in that order.
-    Useful for value network or legacy compatibility.
-
-    Note: Expects already-flattened observations. Use flatten_obs_dict first
-    if observations may be nested.
+    Concatenates imitation_target and proprioception in that order. Expects
+    already-flattened observations; call flatten_obs_dict first if the input
+    may be nested.
 
     Args:
         obs: Observation dict with flat arrays at each key.

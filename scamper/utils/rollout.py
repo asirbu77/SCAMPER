@@ -1,9 +1,4 @@
-"""Rollout generation utilities for imitation learning environments.
-
-This module provides functions to create environments and generate policy
-rollouts with optional logging of activations, metrics, and sensor data.
-Rollouts can be used for evaluation, visualization, or data collection.
-"""
+"""Imitation env construction and policy rollout generators."""
 
 from typing import Any, Callable
 
@@ -65,8 +60,8 @@ def create_rollout_generator(
         env: The environment to run rollouts in.
         inference_fn: Policy function with signature (obs, rng) -> (action, extras).
             The extras dict should contain "activations" if log_activations=True.
-        log_full_states: If True, include full State objects in the rollout output.
-            WARNING: This uses significant memory when batched.
+        log_full_states: If True, include full State objects in the rollout
+            output (memory-heavy when batched).
         log_activations: If True, collect neural network activations at each step.
         log_metrics: If True, collect all metrics from state.metrics at each step.
         log_sensor_data: If True, collect contact forces and sensor readings.

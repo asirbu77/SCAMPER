@@ -1,13 +1,6 @@
-"""Network definitions for behavior-prior training.
-
-This module provides:
-- Loading frozen encoder/decoder/motion-prior from a distill_expert checkpoint
-- Creating a trainable behavior-prior network (same architecture as
-  mlp_prior.Prior, which is reused as the underlying class)
-- Combining networks for checkpointing
-
-The key difference from mlp_prior is that the DistillEncoder takes
-concat([imitation_target, proprioception]) rather than just imitation_target.
+"""Networks for behavior-prior training: loads frozen encoder/decoder/motion
+prior from a distill_expert checkpoint and adds a trainable behavior prior.
+The DistillEncoder takes concat([imitation_target, proprioception]).
 """
 
 from collections.abc import Mapping, Sequence

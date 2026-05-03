@@ -1,18 +1,6 @@
-"""Multi-mode prior rollout evaluation (formerly under scamper.agent.mlp_prior).
-
-This module hosts the prior-rollout evaluation surface that other code still
-depends on after the prior-training pipeline was removed:
-
-- ``MultiModePriorRolloutEvaluator``: runs prior-only rollouts at multiple
-  fixed-logvar settings; consumed by ``distill_expert.distill_train``.
-- ``create_prior_policy``: assembles a prior+decoder rollout policy; consumed
-  by ``scripts/collect_rollout_dataset``.
-- ``reparameterize`` / ``check_termination_nan`` /
-  ``compute_world_zaxis_termination``: small helpers re-exported for
-  ``behavior_prior.behavior_prior_rollout_eval``.
-
-Note: the underlying decoder used here is ``imitation.intention_network.Decoder``
-(byte-equivalent to the old ``mlp_prior.prior_networks.Decoder``).
+"""Prior-rollout evaluation surface shared across distill_expert,
+behavior_prior, and the rollout-collection script. Decoder is
+``imitation.intention_network.Decoder``.
 """
 
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple

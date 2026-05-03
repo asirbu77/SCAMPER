@@ -1,10 +1,5 @@
-"""Checkpoint management utilities for PPO training.
-
-This module provides functions for saving and loading training checkpoints
-using Orbax, including support for:
-- Saving/loading policy parameters, training state, and config
-- Automatic run state discovery for SLURM preemption recovery
-- Cross-job checkpoint resumption with config validation
+"""Orbax-backed checkpoint helpers for PPO training, with run-state files
+for SLURM preemption recovery and cross-job resumption.
 """
 
 import fcntl

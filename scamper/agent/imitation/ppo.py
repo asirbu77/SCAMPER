@@ -11,6 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Modifications copyright 2026 SCAMPER authors. Adapted from Brax PPO with
+# changes for VAE-style intention networks, frozen-decoder transfer, train/test
+# split evaluation, KL scheduling, and SLURM preemption-recovery checkpointing.
 
 """Proximal Policy Optimization (PPO) training for imitation learning.
 

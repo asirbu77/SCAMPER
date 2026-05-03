@@ -1,9 +1,4 @@
-"""Weights & Biases logging utilities for PPO training.
-
-This module provides functions for logging training metrics, rollout videos,
-and latent space statistics to Weights & Biases during reinforcement learning
-training runs.
-"""
+"""W&B logging helpers: training metrics, rollout videos, latent stats."""
 
 import logging
 from typing import Any, Callable
@@ -52,9 +47,8 @@ def rollout_logging_fn(
         render_video: If True, render and log a video of the rollout.
         ppo_network: PPO network container (unused, kept for API compatibility).
 
-    Note:
-        All metrics are logged with commit=False to batch with other logs.
-        The caller should call wandb.log() with commit=True afterward.
+    Metrics are logged with commit=False so the caller can batch them with
+    other logs and commit at the end.
     """
     _, reset_rng, act_rng = jax.random.split(policy_params_fn_key, 3)
     state = jit_reset(reset_rng)
@@ -173,8 +167,7 @@ def log_lineplot_to_wandb(
         data: Either a list of (x, y) tuples, or a tuple of (x_list, y_list).
         title: Title displayed on the wandb plot.
 
-    Note:
-        Logged with commit=False; caller should batch with other logs.
+    Logged with commit=False; caller batches with other logs.
     """
     if isinstance(data[0], tuple):
         frames, values = zip(*data)
@@ -246,9 +239,8 @@ def wandb_progress(num_steps: int, metrics: dict[str, Any]) -> None:
         num_steps: Current training step count.
         metrics: Dictionary of metric names to values to log.
 
-    Note:
-        This function commits the log (unlike other logging functions in this
-        module), so it should be called last in a logging batch.
+    Commits the log (unlike other logging functions in this module), so call
+    this last in a logging batch.
     """
     metrics["num_steps"] = num_steps
     wandb.log(metrics)
