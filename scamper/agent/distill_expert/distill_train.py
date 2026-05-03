@@ -26,7 +26,7 @@ import orbax.checkpoint as ocp
 
 from scamper.agent import checkpointing, gradients
 from scamper.agent.distill_expert import losses as distill_losses
-from scamper.agent.mlp_prior import prior_rollout_eval
+from scamper.agent.imitation import prior_rollout_eval
 from scamper.agent.distill_expert.distill_networks import (
     DistillDecoder,
     DistillEncoder,
@@ -575,7 +575,7 @@ def train(
         proprio_size = obs_sizes["proprioception"]
 
         normalize = running_statistics.normalize
-        # The MultiModePriorRolloutEvaluator API (in scamper.agent.mlp_prior) takes
+        # The MultiModePriorRolloutEvaluator API (in scamper.agent.imitation) takes
         # `prior_hidden_layer_sizes` as the kwarg name; that's an external API and
         # kept as-is. We pass our local motion_prior_hidden_layer_sizes through.
         multi_mode_evaluator = prior_rollout_eval.MultiModePriorRolloutEvaluator(

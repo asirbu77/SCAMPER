@@ -59,8 +59,9 @@ from scamper.environment.rodent import consts as rodent_consts
 from scamper.environment.rodent import arena_forage
 
 from scamper.agent.task_transfer.arena_forage.checkpoint_utils import (
-    load_prior_checkpoint,
+    load_decoder_only_checkpoint,
     load_distill_prior_checkpoint,
+    load_prior_checkpoint,
     make_decoder_inference_fn,
     make_prior_inference_fn,
     make_behavior_prior_inference_fn,
@@ -165,6 +166,8 @@ def main(cfg: DictConfig) -> None:
     # ----------------------------------------------------------------
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
 
+    # `prior_params` defaults to None; only set by modes that load a prior.
+    prior_params = None
     if cfg.mode in ("distill_prior", "distill_prior_no_rgm", "rgm_only"):
         logging.info(f"Loading distill_prior checkpoint from: {prior_checkpoint_path}")
         (
@@ -187,7 +190,18 @@ def main(cfg: DictConfig) -> None:
         ) = load_prior_checkpoint(
             prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
         )
+    elif cfg.mode == "decoder_only":
+        # Compatible with both PPONetwork (mimic-mjx) and PriorNetwork
+        # (legacy train_prior, prior dropped) checkpoints.
+        logging.info(f"Loading decoder_only checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_decoder_only_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
     else:
+        # prior_decoder mode (will be removed in a follow-up pass)
         step_prefix = "PriorNetwork"
         logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
         (

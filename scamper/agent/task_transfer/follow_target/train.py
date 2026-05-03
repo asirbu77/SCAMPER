@@ -55,6 +55,7 @@ from scamper.environment.rodent import consts as rodent_consts
 from scamper.environment.rodent import follow_target
 
 from scamper.agent.task_transfer.follow_target.checkpoint_utils import (
+    load_decoder_only_checkpoint,
     load_prior_checkpoint,
     make_decoder_inference_fn,
     make_prior_inference_fn,
@@ -188,22 +189,43 @@ def main(cfg: DictConfig) -> None:
     # ----------------------------------------------------------------
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
 
+    # `prior_params` defaults to None; only set by modes that load a prior.
+    prior_params = None
     if cfg.mode == "distill":
         step_prefix = "DistillNetwork"
         logging.info(f"Loading distill checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_prior_checkpoint(
+            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
+        )
+    elif cfg.mode == "decoder_only":
+        # Compatible with both PPONetwork (mimic-mjx) and PriorNetwork
+        # (legacy train_prior, prior dropped) checkpoints.
+        logging.info(f"Loading decoder_only checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_decoder_only_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
     else:
+        # prior_decoder mode (will be removed in a follow-up pass)
         step_prefix = "PriorNetwork"
         logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
-
-    (
-        encoder_params,
-        prior_params,
-        decoder_params,
-        normalizer_params,
-        ckpt_cfg,
-    ) = load_prior_checkpoint(
-        prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
-    )
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_prior_checkpoint(
+            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
+        )
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]

@@ -13,7 +13,7 @@ from brax.training import types
 import jax
 import jax.numpy as jnp
 
-from scamper.agent.mlp_prior.losses import (
+from scamper.agent.imitation.prior import (
     compute_encoder_prior_kl_loss,
     create_ramp_schedule,
 )

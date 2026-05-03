@@ -51,6 +51,7 @@ from scamper.environment.rodent import consts as rodent_consts
 from scamper.environment.rodent import bowl_escape
 
 from scamper.agent.task_transfer.bowl_escape.checkpoint_utils import (
+    load_decoder_only_checkpoint,
     load_prior_checkpoint,
     make_decoder_inference_fn,
     make_prior_inference_fn,
@@ -146,18 +147,32 @@ def main(cfg: DictConfig) -> None:
     logging.info(f"Model checkpoint path: {model_path}")
 
     # ----------------------------------------------------------------
-    # Phase 2: Load frozen networks from mlp_prior checkpoint
+    # Phase 2: Load frozen networks from upstream checkpoint
     # ----------------------------------------------------------------
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
-    logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
 
-    (
-        encoder_params,
-        prior_params,
-        decoder_params,
-        normalizer_params,
-        ckpt_cfg,
-    ) = load_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
+    # `prior_params` defaults to None; only set by modes that load a prior.
+    prior_params = None
+    if cfg.mode == "decoder_only":
+        # Compatible with both PPONetwork (mimic-mjx) and PriorNetwork
+        # (legacy train_prior, prior dropped) checkpoints.
+        logging.info(f"Loading decoder_only checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_decoder_only_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
+    else:
+        # prior_decoder mode (will be removed in a follow-up pass)
+        logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
+        (
+            encoder_params,
+            prior_params,
+            decoder_params,
+            normalizer_params,
+            ckpt_cfg,
+        ) = load_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]

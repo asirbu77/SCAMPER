@@ -33,7 +33,7 @@ from scamper.agent.distill_expert.distill_networks import (
     reparameterize,
 )
 from scamper.agent.distill_expert.distill_train import DistillTrainingState
-from scamper.agent.mlp_prior.prior_networks import Prior
+from scamper.agent.imitation.prior import Prior
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     flatten_obs_dict,

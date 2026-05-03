@@ -21,8 +21,8 @@ from brax.training import distribution, types
 from brax.training.acme import running_statistics
 
 from scamper.agent.distill_expert.distill_networks import DistillDecoder
-from scamper.agent.mlp_prior.prior_networks import Prior as BehaviorPrior
-from scamper.agent.mlp_prior.prior_rollout_eval import (
+from scamper.agent.imitation.prior import Prior as BehaviorPrior
+from scamper.agent.imitation.prior_rollout_eval import (
     check_termination_nan,
     compute_world_zaxis_termination,
     reparameterize,

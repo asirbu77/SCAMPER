@@ -53,7 +53,7 @@ from scamper.agent.behavior_prior.behavior_prior_networks import (
     make_distill_encoder_decoder_inference_fn,
 )
 from scamper.agent.expert.mlp_network import MLPPolicy
-from scamper.agent.mlp_prior.prior_rollout_eval import create_prior_policy
+from scamper.agent.imitation.prior_rollout_eval import create_prior_policy
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,

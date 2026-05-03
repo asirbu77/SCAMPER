@@ -4,8 +4,8 @@ Defines encoder, decoder, and motion-prior networks for distilling an expert
 teacher into a VAE student with a jointly trained motion prior.
 
 Key constraint: the Decoder and motion-prior parameter trees must exactly
-match those of intention_network.Decoder and mlp_prior.Prior respectively,
-so that checkpoints are compatible with task_transfer wrappers.
+match those of imitation.intention_network.Decoder and imitation.prior.Prior
+respectively, so that checkpoints are compatible with task_transfer wrappers.
 """
 
 from collections.abc import Mapping, Sequence
@@ -18,7 +18,7 @@ from brax.training.acme import running_statistics, specs
 from flax import linen as nn
 
 from scamper.agent.imitation import intention_network
-from scamper.agent.mlp_prior.prior_networks import Prior as OriginalPrior
+from scamper.agent.imitation.prior import Prior as OriginalPrior
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     normalize_dict_obs,
