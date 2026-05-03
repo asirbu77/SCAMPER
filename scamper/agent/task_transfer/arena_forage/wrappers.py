@@ -1,12 +1,10 @@
 """Environment wrappers for arena forage task transfer training.
 
-Five wrapper classes for different transfer learning modes:
-- DecoderHighLevelWrapper: Policy outputs latent -> frozen decoder -> ctrl
-- PriorDecoderHighLevelWrapper: Policy outputs residual -> add to prior mean -> decoder -> ctrl
-  (used by prior_decoder, distill, and distill_prior_no_rgm modes)
-- RGMDecoderHighLevelWrapper: Policy outputs residual -> add to rgm mean -> decoder -> ctrl
-- PriorRGMDecoderHighLevelWrapper: Policy outputs residual + gate -> select prior or rgm -> decoder -> ctrl
-- FlatObsWrapper: Converts dict observations to flat arrays (for scratch mode)
+Wrapper classes for different transfer learning modes:
+- DecoderHighLevelWrapper: Policy outputs latent -> frozen decoder -> ctrl (mimic_mjx mode)
+- PriorDecoderHighLevelWrapper: Policy outputs residual -> add to motion prior mean -> decoder -> ctrl (res_control mode)
+- PriorRGMDecoderHighLevelWrapper: Policy outputs residual + gate -> select motion prior or behavior prior -> decoder -> ctrl (prior_gating mode)
+- FlatObsWrapper: Converts dict observations to flat arrays (scratch mode)
 
 Supports both legacy flat observations and new dict observations format.
 """

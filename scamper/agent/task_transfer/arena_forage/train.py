@@ -1,23 +1,17 @@
 """Arena forage task transfer training with Brax PPO.
 
-Seven training modes:
-- decoder_only: Freeze decoder, train new encoder
-- prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
-- distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
-- distill_prior: Freeze prior + rgm + decoder, train residual + gate (from distill_prior checkpoint)
-- distill_prior_no_rgm: Freeze prior + decoder, train residual (from distill_prior checkpoint, ignores rgm/gate)
-- rgm_only: Freeze rgm + decoder, train residual added to rgm mean (from distill_prior checkpoint)
+Four training modes:
+- mimic_mjx: Freeze decoder, train new encoder
+- res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
+- prior_gating: Freeze motion prior + behavior prior + decoder, train residual + gate (from behavior_prior checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
 
 Usage:
-    python -m scamper.agent.task_transfer.arena_forage.train mode=decoder_only
-    python -m scamper.agent.task_transfer.arena_forage.train mode=prior_decoder
-    python -m scamper.agent.task_transfer.arena_forage.train mode=distill
-    python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior
-    python -m scamper.agent.task_transfer.arena_forage.train mode=distill_prior_no_rgm
-    python -m scamper.agent.task_transfer.arena_forage.train mode=rgm_only
+    python -m scamper.agent.task_transfer.arena_forage.train mode=mimic_mjx
+    python -m scamper.agent.task_transfer.arena_forage.train mode=res_control
+    python -m scamper.agent.task_transfer.arena_forage.train mode=prior_gating
     python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 """
 
@@ -83,7 +77,6 @@ from scamper.agent.task_transfer.arena_forage.wrappers import (
     FlatObsWrapper,
     PriorDecoderHighLevelWrapper,
     PriorRGMDecoderHighLevelWrapper,
-    RGMDecoderHighLevelWrapper,
 )
 from scamper.agent.task_transfer.arena_forage.scratch_networks import (
     make_scratch_ppo_networks,
@@ -168,8 +161,8 @@ def main(cfg: DictConfig) -> None:
 
     # `prior_params` defaults to None; only set by modes that load a prior.
     prior_params = None
-    if cfg.mode in ("distill_prior", "distill_prior_no_rgm", "rgm_only"):
-        logging.info(f"Loading distill_prior checkpoint from: {prior_checkpoint_path}")
+    if cfg.mode == "prior_gating":
+        logging.info(f"Loading prior_gating checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
             prior_params,
@@ -178,9 +171,9 @@ def main(cfg: DictConfig) -> None:
             normalizer_params,
             ckpt_cfg,
         ) = load_distill_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
-    elif cfg.mode == "distill":
+    elif cfg.mode == "res_control":
         step_prefix = "DistillNetwork"
-        logging.info(f"Loading distill checkpoint from: {prior_checkpoint_path}")
+        logging.info(f"Loading res_control checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
             prior_params,
@@ -190,29 +183,17 @@ def main(cfg: DictConfig) -> None:
         ) = load_prior_checkpoint(
             prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
         )
-    elif cfg.mode == "decoder_only":
-        # Compatible with both PPONetwork (mimic-mjx) and PriorNetwork
-        # (legacy train_prior, prior dropped) checkpoints.
-        logging.info(f"Loading decoder_only checkpoint from: {prior_checkpoint_path}")
+    else:
+        # mimic_mjx loads encoder+decoder for frozen-decoder transfer; scratch
+        # uses the same load path purely to derive env/network sizes from
+        # ckpt_cfg (the loaded params are unused in scratch mode).
+        logging.info(f"Loading checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
             decoder_params,
             normalizer_params,
             ckpt_cfg,
         ) = load_decoder_only_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
-    else:
-        # prior_decoder mode (will be removed in a follow-up pass)
-        step_prefix = "PriorNetwork"
-        logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
-        (
-            encoder_params,
-            prior_params,
-            decoder_params,
-            normalizer_params,
-            ckpt_cfg,
-        ) = load_prior_checkpoint(
-            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
-        )
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]
@@ -225,7 +206,7 @@ def main(cfg: DictConfig) -> None:
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
-    if cfg.mode in ("distill_prior", "distill_prior_no_rgm", "rgm_only"):
+    if cfg.mode == "prior_gating":
         frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
@@ -273,8 +254,8 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Set actuator type: scratch mode can optionally use PD actuators;
-    # decoder_only and prior_decoder always use torque (frozen decoder
-    # was trained with torque actuators).
+    # mimic_mjx always uses torque (frozen decoder was trained with torque
+    # actuators).
     if cfg.mode == "scratch":
         env_cfg.torque_actuators = cfg.scratch.get("torque_actuators", True)
         if not env_cfg.torque_actuators:
@@ -294,20 +275,20 @@ def main(cfg: DictConfig) -> None:
             base_env._mj_model, impl=env_cfg.mujoco_impl
         )
 
-        if cfg.mode == "decoder_only":
+        if cfg.mode == "mimic_mjx":
             return DecoderHighLevelWrapper(
                 base_env, decoder_fn, latent_size, proprio_size
             )
         elif cfg.mode == "scratch":
             return FlatObsWrapper(base_env)
-        elif cfg.mode == "distill_prior":
+        elif cfg.mode == "prior_gating":
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
             behavior_prior_fn = make_behavior_prior_inference_fn(
                 rgm_params, normalizer_params, ckpt_cfg
             )
-            mode_cfg = cfg.distill_prior
+            mode_cfg = cfg.prior_gating
             rgm_logvar = mode_cfg.get("rgm_logvar", None)
             return PriorRGMDecoderHighLevelWrapper(
                 base_env,
@@ -321,31 +302,11 @@ def main(cfg: DictConfig) -> None:
                 rgm_noise=mode_cfg.rgm_noise,
                 rgm_logvar=rgm_logvar,
             )
-        elif cfg.mode == "rgm_only":
-            behavior_prior_fn = make_behavior_prior_inference_fn(
-                rgm_params, normalizer_params, ckpt_cfg
-            )
-            mode_cfg = cfg.rgm_only
-            rgm_logvar = mode_cfg.get("rgm_logvar", None)
-            return RGMDecoderHighLevelWrapper(
-                base_env,
-                behavior_prior_fn,
-                decoder_fn,
-                latent_size,
-                proprio_size,
-                rgm_noise=mode_cfg.rgm_noise,
-                rgm_logvar=rgm_logvar,
-            )
-        else:  # prior_decoder, distill, or distill_prior_no_rgm
+        else:  # res_control
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
-            if cfg.mode == "distill":
-                mode_cfg = cfg.distill
-            elif cfg.mode == "distill_prior_no_rgm":
-                mode_cfg = cfg.distill_prior_no_rgm
-            else:
-                mode_cfg = cfg.prior_decoder
+            mode_cfg = cfg.res_control
             return PriorDecoderHighLevelWrapper(
                 base_env,
                 prior_fn,

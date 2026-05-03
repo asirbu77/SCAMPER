@@ -1,17 +1,15 @@
 """Walk-rear task transfer training with Brax PPO.
 
-Four training modes:
-- decoder_only: Freeze decoder, train new encoder
-- prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
-- distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
+Three training modes:
+- mimic_mjx: Freeze decoder, train new encoder
+- res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
 
 Usage:
-    python -m scamper.agent.task_transfer.walk_rear.train mode=decoder_only
-    python -m scamper.agent.task_transfer.walk_rear.train mode=prior_decoder
-    python -m scamper.agent.task_transfer.walk_rear.train mode=distill
+    python -m scamper.agent.task_transfer.walk_rear.train mode=mimic_mjx
+    python -m scamper.agent.task_transfer.walk_rear.train mode=res_control
     python -m scamper.agent.task_transfer.walk_rear.train mode=scratch
 """
 
@@ -152,9 +150,9 @@ def main(cfg: DictConfig) -> None:
 
     # `prior_params` defaults to None; only set by modes that load a prior.
     prior_params = None
-    if cfg.mode == "distill":
+    if cfg.mode == "res_control":
         step_prefix = "DistillNetwork"
-        logging.info(f"Loading distill checkpoint from: {prior_checkpoint_path}")
+        logging.info(f"Loading res_control checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
             prior_params,
@@ -164,29 +162,17 @@ def main(cfg: DictConfig) -> None:
         ) = load_prior_checkpoint(
             prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
         )
-    elif cfg.mode == "decoder_only":
-        # Compatible with both PPONetwork (mimic-mjx) and PriorNetwork
-        # (legacy train_prior, prior dropped) checkpoints.
-        logging.info(f"Loading decoder_only checkpoint from: {prior_checkpoint_path}")
+    else:
+        # mimic_mjx loads encoder+decoder for frozen-decoder transfer; scratch
+        # uses the same load path purely to derive env/network sizes from
+        # ckpt_cfg (the loaded params are unused in scratch mode).
+        logging.info(f"Loading checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
             decoder_params,
             normalizer_params,
             ckpt_cfg,
         ) = load_decoder_only_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
-    else:
-        # prior_decoder mode (will be removed in a follow-up pass)
-        step_prefix = "PriorNetwork"
-        logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
-        (
-            encoder_params,
-            prior_params,
-            decoder_params,
-            normalizer_params,
-            ckpt_cfg,
-        ) = load_prior_checkpoint(
-            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
-        )
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]
@@ -245,8 +231,8 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Set actuator type: scratch mode can optionally use PD actuators;
-    # decoder_only, prior_decoder, and distill always use torque (frozen
-    # decoder was trained with torque actuators).
+    # mimic_mjx and res_control always use torque (frozen decoder was trained
+    # with torque actuators).
     if cfg.mode == "scratch":
         env_cfg.torque_actuators = cfg.scratch.get("torque_actuators", True)
         if not env_cfg.torque_actuators:
@@ -259,17 +245,17 @@ def main(cfg: DictConfig) -> None:
     def make_wrapped_env(is_eval: bool = False):
         base_env = walk_rear.WalkRear(config=env_cfg)
 
-        if cfg.mode == "decoder_only":
+        if cfg.mode == "mimic_mjx":
             return DecoderHighLevelWrapper(
                 base_env, decoder_fn, latent_size, proprio_size
             )
         elif cfg.mode == "scratch":
             return FlatObsWrapper(base_env)
-        else:  # prior_decoder or distill
+        else:  # res_control
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
-            mode_cfg = cfg.distill if cfg.mode == "distill" else cfg.prior_decoder
+            mode_cfg = cfg.res_control
             return PriorDecoderHighLevelWrapper(
                 base_env,
                 prior_fn,

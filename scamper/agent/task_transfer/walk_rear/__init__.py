@@ -1,8 +1,8 @@
 """Walk-rear task transfer training pipeline.
 
 Three training modes:
-1. decoder_only: Freeze decoder, train new encoder
-2. prior_decoder: Freeze prior + decoder, train residual encoder
+1. mimic_mjx: Freeze decoder, train new encoder
+2. res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
 3. scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.

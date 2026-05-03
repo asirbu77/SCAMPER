@@ -152,7 +152,7 @@ def load_decoder_only_checkpoint(
     checkpoint_path: str,
     step: int | None = None,
 ) -> Tuple[Dict, Dict, DictRunningStatisticsState, Dict]:
-    """Load encoder + decoder for ``mode == "decoder_only"`` task transfer.
+    """Load encoder + decoder for ``mode == "mimic_mjx"`` task transfer.
 
     Compatible with two checkpoint flavors:
 
@@ -429,12 +429,8 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
         "train": OmegaConf.to_container(cfg.train, resolve=True),
         "env": OmegaConf.to_container(cfg.env, resolve=True),
     }
-    if cfg.mode == "prior_decoder":
-        hashable["prior_decoder"] = OmegaConf.to_container(
-            cfg.prior_decoder, resolve=True
-        )
-    elif cfg.mode == "distill":
-        hashable["distill"] = OmegaConf.to_container(cfg.distill, resolve=True)
+    if cfg.mode == "res_control":
+        hashable["res_control"] = OmegaConf.to_container(cfg.res_control, resolve=True)
     cfg_str = json.dumps(hashable, sort_keys=True, default=str)
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]
 

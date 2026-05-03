@@ -1,56 +1,37 @@
 # Maintain Velocity Task Transfer Training Config
 #
-# Six training modes:
-#   decoder_only: Freeze decoder, train new encoder
-#   prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
-#   distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
-#   distill_prior: Freeze prior + rgm + decoder, train residual + gate (from distill_prior checkpoint)
-#   rgm_only: Freeze rgm + decoder, train residual added to rgm mean (from distill_prior checkpoint)
+# Three training modes:
+#   mimic_mjx: Freeze decoder, train new encoder
+#   res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
 # Usage:
-#   python -m scamper.agent.task_transfer.maintain_velocity.train mode=decoder_only
-#   python -m scamper.agent.task_transfer.maintain_velocity.train mode=prior_decoder
-#   python -m scamper.agent.task_transfer.maintain_velocity.train mode=distill
-#   python -m scamper.agent.task_transfer.maintain_velocity.train mode=distill_prior
-#   python -m scamper.agent.task_transfer.maintain_velocity.train mode=rgm_only
+#   python -m scamper.agent.task_transfer.maintain_velocity.train mode=mimic_mjx
+#   python -m scamper.agent.task_transfer.maintain_velocity.train mode=res_control
 #   python -m scamper.agent.task_transfer.maintain_velocity.train mode=scratch
 
 defaults:
   - _self_
 
-# Training mode: "decoder_only", "prior_decoder", "distill", "distill_prior", or "scratch"
-mode: "decoder_only"
+# Training mode: "mimic_mjx", "res_control", or "scratch"
+mode: "mimic_mjx"
 
-# Checkpoint to load (mlp_prior checkpoint)
+# Checkpoint to load
 checkpoint:
   path: "./model_checkpoints/YYMMDD_HHMMSS"  # Replace with your checkpoint
   step: null  # null = latest
 
 # Mode-specific settings
-decoder_only:
+mimic_mjx:
   _placeholder: true
 
-prior_decoder:
+res_control:
   deterministic_prior: true
   noise_logvar: -2.0
-
-distill:
-  deterministic_prior: true
-  noise_logvar: -2.0
-
-distill_prior:
-  gate_bias: 0.0    # Threshold for binary gate: gate = 1 if gate_logit > gate_bias
-  gate_margin: 0.0  # Hysteresis margin for bistable switching (0.0 = no hysteresis)
-  rgm_noise: false  # false = use rgm_mean only, true = sample with predicted logvar
-
-rgm_only:
-  rgm_noise: false  # false = use rgm_mean only, true = sample with noise
-  rgm_logvar: null   # null = use predicted logvar, float = fixed logvar (only when rgm_noise=true)
 
 scratch:
   # Actuator type: true = torque (matches imitation training), false = PD actuators
-  # Only applies in scratch mode. decoder_only and prior_decoder always use torque.
+  # Only applies in scratch mode. mimic_mjx always uses torque.
   torque_actuators: true
 
 # Network architecture

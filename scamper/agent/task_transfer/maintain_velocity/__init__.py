@@ -1,11 +1,9 @@
 """Maintain velocity task transfer training pipeline.
 
-Five training modes:
-1. decoder_only: Freeze decoder, train new encoder
-2. prior_decoder: Freeze prior + decoder, train residual encoder
-3. distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
-4. distill_prior: Freeze prior + rgm + decoder, train residual encoder (from distill_prior checkpoint)
-5. scratch: Train both policy and decoder from random initialization
+Three training modes:
+1. mimic_mjx: Freeze decoder, train new encoder
+2. res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
+3. scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
 
@@ -18,12 +16,9 @@ imported before train.py can set the environment variable.
 __all__ = [
     "DecoderHighLevelWrapper",
     "PriorDecoderHighLevelWrapper",
-    "PriorRGMDecoderHighLevelWrapper",
     "load_prior_checkpoint",
-    "load_distill_prior_checkpoint",
     "make_decoder_inference_fn",
     "make_prior_inference_fn",
-    "make_behavior_prior_inference_fn",
     "discover_existing_run_state",
     "save_run_state",
     "cleanup_run_state",
