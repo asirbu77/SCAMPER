@@ -25,12 +25,13 @@ import argparse
 import os
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["MUJOCO_GL"] = "egl"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
+import h5py
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -38,7 +39,11 @@ import optax
 import orbax.checkpoint as ocp
 from brax.training import distribution
 from brax.training.acme import running_statistics, specs
+from jax import random
+from ml_collections import ConfigDict
+from mujoco import mjx
 from omegaconf import OmegaConf
+from tqdm import tqdm
 
 from scamper.agent.distill_expert.distill_networks import (
     DistillNetworkParams,
@@ -53,22 +58,19 @@ from scamper.agent.behavior_prior.behavior_prior_networks import (
     make_distill_encoder_decoder_inference_fn,
 )
 from scamper.agent.expert.mlp_network import MLPPolicy
-from scamper.agent.imitation.prior_rollout_eval import create_prior_policy
+from scamper.agent.imitation.prior_rollout_eval import (
+    create_prior_policy,
+    extract_prior_decoder_params,
+)
 from scamper.agent.observation_utils import (
     DictRunningStatisticsState,
     concat_flat_dict_obs,
+    convert_flat_to_dict_normalizer,
     normalize_dict_obs,
 )
-from scamper.scripts.collect_rollout_dataset import (
-    collect_rollouts,
-    create_batched_rollout_fn,
-    create_environment,
-    create_prior_policy_fn,
-    fix_config_paths,
-    get_observation_sizes,
-    get_original_qpos,
-    save_results,
-)
+from scamper.environment import wrappers as vnl_wrappers
+from scamper.environment.reference_clips import ReferenceClips
+from scamper.environment.rodent import imitation
 
 
 def parse_args() -> argparse.Namespace:
@@ -161,6 +163,422 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+def get_observation_sizes(cfg: Any) -> Tuple[int, int, int]:
+    """Extract observation sizes from config, supporting both legacy and dict formats.
+
+    Args:
+        cfg: OmegaConf configuration.
+
+    Returns:
+        Tuple of (reference_obs_size, proprioceptive_obs_size, total_obs_size).
+    """
+    network_config = cfg.network_config
+
+    # Check for new dict-based format
+    if hasattr(network_config, "obs_sizes") or "obs_sizes" in network_config:
+        obs_sizes = network_config.obs_sizes
+        reference_obs_size = int(obs_sizes["imitation_target"])
+        proprioceptive_obs_size = int(obs_sizes["proprioception"])
+        total_obs_size = reference_obs_size + proprioceptive_obs_size
+    else:
+        # Legacy flat format
+        total_obs_size = int(network_config.observation_size)
+        reference_obs_size = int(network_config.reference_obs_size)
+        proprioceptive_obs_size = total_obs_size - reference_obs_size
+
+    return reference_obs_size, proprioceptive_obs_size, total_obs_size
+
+
+def fix_config_paths(
+    cfg: Any, data_path_override: str | None = None, batch_size: int = 1
+) -> Any:
+    """Fix paths in config that may reference /tmp or other locations.
+
+    Args:
+        cfg: OmegaConf configuration.
+        data_path_override: Optional override for reference_data_path.
+        batch_size: Batch size for computing naconmax (nconmax * batch_size).
+
+    Returns:
+        Updated configuration.
+    """
+    PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
+
+    def fix_path(path_str):
+        if not path_str:
+            return path_str
+
+        # Paths containing scamper/environment/ resolve via the current installation
+        ENV_MARKER = "scamper/environment/"
+        if ENV_MARKER in path_str:
+            import scamper.environment
+
+            env_root = str(Path(scamper.environment.__file__).parent)
+            rel_path = path_str[path_str.index(ENV_MARKER) + len(ENV_MARKER) :]
+            return os.path.join(env_root, rel_path)
+
+        # Legacy: old checkpoints with vnl_playground/tasks/ paths
+        VNL_MARKER = "vnl_playground/tasks/"
+        if VNL_MARKER in path_str:
+            import scamper.environment
+
+            env_root = str(Path(scamper.environment.__file__).parent)
+            rel_path = path_str[path_str.index(VNL_MARKER) + len(VNL_MARKER) :]
+            return os.path.join(env_root, rel_path)
+
+        # Any /tmp/<project>/... path: strip the prefix and resolve relative
+        # to the current project root (handles /tmp/scamper, /tmp/track-mjx, etc.)
+        if path_str.startswith("/tmp/"):
+            parts = path_str.split("/")
+            if len(parts) > 3:
+                rest = "/".join(parts[3:])
+                return os.path.join(PROJECT_ROOT, rest)
+
+        return path_str
+
+    OmegaConf.set_struct(cfg.env_config, False)
+
+    if hasattr(cfg.env_config, "walker_xml_path"):
+        OmegaConf.update(
+            cfg.env_config, "walker_xml_path", fix_path(cfg.env_config.walker_xml_path)
+        )
+    if hasattr(cfg.env_config, "arena_xml_path"):
+        OmegaConf.update(
+            cfg.env_config, "arena_xml_path", fix_path(cfg.env_config.arena_xml_path)
+        )
+
+    if data_path_override:
+        OmegaConf.update(cfg.env_config, "reference_data_path", data_path_override)
+    elif hasattr(cfg.env_config, "reference_data_path"):
+        OmegaConf.update(
+            cfg.env_config,
+            "reference_data_path",
+            fix_path(cfg.env_config.reference_data_path),
+        )
+
+    # Compute naconmax for warp backend (naconmax = nconmax * batch_size)
+    # Only compute if naconmax is not already set (legacy support)
+    if hasattr(cfg.env_config, "nconmax") and not hasattr(cfg.env_config, "naconmax"):
+        OmegaConf.update(
+            cfg.env_config, "naconmax", cfg.env_config.nconmax * batch_size
+        )
+
+    OmegaConf.set_struct(cfg.env_config, True)
+    return cfg
+
+
+def create_environment(cfg: Any) -> Tuple[Any, ReferenceClips]:
+    """Create the imitation environment from config.
+
+    Args:
+        cfg: Configuration from checkpoint.
+
+    Returns:
+        Tuple of (environment, reference_clips).
+    """
+    env_cfg = ConfigDict(OmegaConf.to_container(cfg.env_config, resolve=True))
+
+    reference_clips = ReferenceClips(
+        data_path=cfg.env_config.reference_data_path,
+        n_frames_per_clip=cfg.env_config.clip_length,
+        keep_clips_idx=cfg.env_config.get("keep_clips_idx", None),
+    )
+
+    env = vnl_wrappers.FlattenObsWrapper(
+        imitation.Imitation(config=env_cfg, clips=reference_clips)
+    )
+
+    return env, reference_clips
+
+
+def create_prior_policy_fn(
+    policy_params: Tuple,
+    cfg: Any,
+    fixed_logvar: Optional[float],
+    deterministic: bool,
+) -> Callable:
+    """Create prior policy using prior and decoder networks.
+
+    Args:
+        policy_params: Tuple of (normalizer_params, network_params).
+        cfg: Configuration from checkpoint.
+        fixed_logvar: Fixed log-variance for sampling. If None, uses predicted logvar.
+        deterministic: If True, use mean instead of sampling.
+
+    Returns:
+        Policy function (obs, rng) -> (action, extras).
+    """
+    prior_params, decoder_params, normalizer_params = extract_prior_decoder_params(
+        policy_params
+    )
+
+    _, proprioceptive_obs_size, _ = get_observation_sizes(cfg)
+
+    # Get proprioceptive-only normalizer
+    if isinstance(normalizer_params, DictRunningStatisticsState):
+        # Dict normalizer - proprioception is already separate
+        proprio_normalizer_params = normalizer_params.proprioception
+    else:
+        # Legacy flat normalizer - slice to get proprioceptive portion
+        proprio_normalizer_params = running_statistics.RunningStatisticsState(
+            count=normalizer_params.count,
+            mean=normalizer_params.mean[-proprioceptive_obs_size:],
+            summed_variance=normalizer_params.summed_variance[
+                -proprioceptive_obs_size:
+            ],
+            std=normalizer_params.std[-proprioceptive_obs_size:],
+        )
+
+    prior_hidden_layer_sizes = tuple(
+        cfg.network_config.get(
+            "prior_layer_sizes", cfg.network_config.encoder_layer_sizes
+        )
+    )
+
+    return create_prior_policy(
+        prior_network_params=prior_params,
+        decoder_network_params=decoder_params,
+        normalizer_params=proprio_normalizer_params,
+        intention_latent_size=cfg.network_config.intention_size,
+        action_size=cfg.network_config.action_size,
+        proprioceptive_obs_size=proprioceptive_obs_size,
+        decoder_hidden_layer_sizes=tuple(cfg.network_config.decoder_layer_sizes),
+        prior_hidden_layer_sizes=prior_hidden_layer_sizes,
+        preprocess_observations_fn=running_statistics.normalize,
+        fixed_logvar=fixed_logvar,
+        deterministic=deterministic,
+    )
+
+
+def create_batched_rollout_fn(
+    env: Any,
+    policy_fn: Callable,
+    num_steps: int,
+    proprioceptive_obs_size: int,
+    reference_obs_size: int,
+    is_prior_policy: bool,
+    intention_size: int,
+) -> Callable:
+    """Create a batched rollout function for multiple clips.
+
+    Args:
+        env: The environment.
+        policy_fn: Policy function (obs, rng) -> (action, extras).
+        num_steps: Number of physics steps per rollout.
+        proprioceptive_obs_size: Size of proprioceptive observations.
+        reference_obs_size: Size of reference/imitation_target observations.
+        is_prior_policy: If True, pass only proprioceptive obs to policy.
+        intention_size: Dimension of the latent intention vector.
+
+    Returns:
+        A function that takes (initial_qpos_batch, clip_indices, rng_keys) and
+        returns (qpos_trajectories, latents_trajectories).
+    """
+    jit_step = jax.jit(env.step)
+    jit_reset = jax.jit(env.reset)
+    mjx_model = env.mjx_model
+
+    def single_rollout(
+        initial_qpos: jax.Array, clip_idx: int, rng_key: jax.Array
+    ) -> Tuple[jax.Array, jax.Array]:
+        """Run single rollout from initial_qpos, return qpos and latents trajectories."""
+        reset_key, rollout_key = random.split(rng_key)
+
+        # Reset environment to get proper state structure at specific clip
+        state = jit_reset(reset_key, clip_idx=clip_idx, start_frame=0)
+
+        # Replace qpos with initial_qpos and set qvel to zeros
+        data = state.data.replace(qpos=initial_qpos)
+        data = data.replace(qvel=jnp.zeros(mjx_model.nv))
+        data = mjx.forward(mjx_model, data)
+        state = state.replace(data=data)
+
+        def step_fn(carry, _):
+            state, key = carry
+            key, action_key = random.split(key)
+
+            # Get observations for policy
+            if is_prior_policy:
+                # Prior policy uses only proprioceptive observations
+                obs = state.obs[..., -proprioceptive_obs_size:]
+            else:
+                # Encoder-decoder expects dict observations
+                obs = {
+                    "imitation_target": state.obs[..., :reference_obs_size],
+                    "proprioception": state.obs[..., reference_obs_size:],
+                }
+
+            # Get action and extras (including sampled latent) from policy
+            action, extras = policy_fn(obs, action_key)
+            z = extras["intention"]
+
+            # Step environment
+            next_state = jit_step(state, action)
+
+            return (next_state, key), (next_state.data.qpos, z)
+
+        # Run rollout for num_steps - 1 (we already have initial qpos)
+        initial_carry = (state, rollout_key)
+        _, (qpos_trajectory, latents_trajectory) = jax.lax.scan(
+            step_fn, initial_carry, None, length=num_steps - 1
+        )
+
+        # Prepend initial qpos and zeros for latent (no policy call at t=0)
+        qpos_trajectory = jnp.concatenate(
+            [initial_qpos[None, :], qpos_trajectory], axis=0
+        )
+        latents_trajectory = jnp.concatenate(
+            [jnp.zeros((1, intention_size)), latents_trajectory], axis=0
+        )
+
+        return (
+            qpos_trajectory,
+            latents_trajectory,
+        )
+
+    # Vmap over batch of clips
+    batched_rollout = jax.jit(jax.vmap(single_rollout))
+
+    return batched_rollout
+
+
+def collect_rollouts(
+    env: Any,
+    reference_clips: ReferenceClips,
+    policy_fn: Callable,
+    num_clips: int,
+    num_steps: int,
+    batch_size: int,
+    proprioceptive_obs_size: int,
+    reference_obs_size: int,
+    intention_size: int,
+    is_prior_policy: bool,
+    rng_key: jax.Array,
+    desc: str = "Collecting rollouts",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Collect rollouts for all clips.
+
+    Args:
+        env: Environment.
+        reference_clips: ReferenceClips object.
+        policy_fn: Policy function.
+        num_clips: Total number of clips.
+        num_steps: Steps per rollout.
+        batch_size: Clips per batch.
+        proprioceptive_obs_size: Size of proprioceptive observations.
+        reference_obs_size: Size of reference/imitation_target observations.
+        intention_size: Dimension of the latent intention vector.
+        is_prior_policy: If True, pass only proprioceptive obs to policy.
+        rng_key: Random key.
+        desc: Progress bar description.
+
+    Returns:
+        Tuple of (qpos, latents) arrays with shapes
+        (num_clips, num_steps, qpos_dim) and (num_clips, num_steps, intention_size).
+    """
+    batched_rollout = create_batched_rollout_fn(
+        env,
+        policy_fn,
+        num_steps,
+        proprioceptive_obs_size,
+        reference_obs_size,
+        is_prior_policy,
+        intention_size,
+    )
+
+    all_qpos = []
+    all_latents = []
+    num_batches = (num_clips + batch_size - 1) // batch_size
+
+    for batch_idx in tqdm(range(num_batches), desc=desc):
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, num_clips)
+        actual_batch_size = end_idx - start_idx
+
+        # Get initial qpos for this batch (first frame of each clip)
+        initial_qpos_batch = jnp.stack(
+            [
+                reference_clips.at(clip=i, frame=0).qpos
+                for i in range(start_idx, end_idx)
+            ]
+        )
+
+        # Clip indices for this batch
+        clip_indices = jnp.arange(start_idx, end_idx)
+
+        # Generate random keys for this batch
+        rng_key, batch_key = random.split(rng_key)
+        batch_keys = random.split(batch_key, actual_batch_size)
+
+        # Run batched rollouts
+        qpos_batch, latents_batch = batched_rollout(
+            initial_qpos_batch, clip_indices, batch_keys
+        )
+
+        # Transfer to CPU and append
+        all_qpos.append(np.array(qpos_batch))
+        all_latents.append(np.array(latents_batch))
+
+    return np.concatenate(all_qpos, axis=0), np.concatenate(all_latents, axis=0)
+
+
+def get_original_qpos(reference_clips: ReferenceClips) -> np.ndarray:
+    """Extract original qpos from reference clips.
+
+    Args:
+        reference_clips: ReferenceClips object.
+
+    Returns:
+        qpos array of shape (num_clips, num_steps, qpos_dim).
+    """
+    return np.array(reference_clips.qpos)
+
+
+def save_results(
+    output_path: str,
+    original_qpos: np.ndarray,
+    results: Dict[str, np.ndarray],
+    latents_results: Dict[str, np.ndarray],
+    checkpoint_path: str,
+    num_clips: int,
+    num_steps: int,
+    logvars: Sequence[float],
+    intention_size: int,
+) -> None:
+    """Save all rollout data to H5 file.
+
+    Args:
+        output_path: Path to output H5 file.
+        original_qpos: Original reference qpos.
+        results: Dictionary mapping rollout name to qpos arrays.
+        latents_results: Dictionary mapping rollout name to latents arrays.
+        checkpoint_path: Path to source checkpoint.
+        num_clips: Number of clips.
+        num_steps: Steps per clip.
+        logvars: List of logvar values used for non-deterministic rollouts.
+        intention_size: Dimension of the latent intention vector.
+    """
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with h5py.File(output_path, "w") as f:
+        f.create_dataset("original_qpos", data=original_qpos, dtype="float32")
+
+        for name, data in results.items():
+            f.create_dataset(f"{name}_qpos", data=data, dtype="float32")
+        for name, data in latents_results.items():
+            f.create_dataset(f"{name}_latents", data=data, dtype="float32")
+
+        f.attrs["num_clips"] = num_clips
+        f.attrs["num_steps"] = num_steps
+        f.attrs["qpos_dim"] = original_qpos.shape[-1]
+        f.attrs["intention_size"] = intention_size
+        f.attrs["checkpoint_path"] = checkpoint_path
+        f.attrs["logvars"] = list(logvars)
+
+    print(f"Saved results to {output_path}")
 
 
 def load_teacher_config(teacher_checkpoint_path: str) -> Any:
