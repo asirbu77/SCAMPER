@@ -11,16 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Modifications copyright 2026 SCAMPER authors. Adapted from Brax PPO losses
+# with KL-to-prior, AR(1) latent regularization, and KL scheduling added for
+# VAE-style intention networks.
 
-"""PPO loss functions for intention-based imitation learning.
-
-This module provides loss computation for PPO training with VAE-style
-intention networks, including:
-- Generalized Advantage Estimation (GAE)
-- Clipped surrogate policy loss
-- Value function loss
-- Entropy bonus
-- KL divergence loss for VAE latent space (with autoregressive prior)
+"""PPO losses: GAE, clipped surrogate, value, entropy, plus KL-to-prior and
+AR(1) regularization on the VAE latent.
 """
 
 from collections.abc import Callable

@@ -1,7 +1,6 @@
 """Common wrappers for MjxEnv-based environments.
 
-These wrappers are generic and work with any MjxEnv-based environment,
-including rodent, fruitfly, and future organisms.
+These wrappers are generic and work with any MjxEnv-based environment.
 """
 
 from typing import Any, Callable, Mapping

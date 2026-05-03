@@ -1,21 +1,15 @@
 """Maintain velocity task transfer training with Brax PPO.
 
-Six training modes:
-- decoder_only: Freeze decoder, train new encoder
-- prior_decoder: Freeze prior + decoder, train residual encoder (from mlp_prior checkpoint)
-- distill: Freeze prior + decoder, train residual encoder (from distill checkpoint)
-- distill_prior: Freeze prior + rgm + decoder, train residual + gate (from distill_prior checkpoint)
-- rgm_only: Freeze rgm + decoder, train residual added to rgm mean (from distill_prior checkpoint)
+Three training modes:
+- mimic_mjx: Freeze decoder, train new encoder
+- res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
 
 Usage:
-    python -m scamper.agent.task_transfer.maintain_velocity.train mode=decoder_only
-    python -m scamper.agent.task_transfer.maintain_velocity.train mode=prior_decoder
-    python -m scamper.agent.task_transfer.maintain_velocity.train mode=distill
-    python -m scamper.agent.task_transfer.maintain_velocity.train mode=distill_prior
-    python -m scamper.agent.task_transfer.maintain_velocity.train mode=rgm_only
+    python -m scamper.agent.task_transfer.maintain_velocity.train mode=mimic_mjx
+    python -m scamper.agent.task_transfer.maintain_velocity.train mode=res_control
     python -m scamper.agent.task_transfer.maintain_velocity.train mode=scratch
 """
 
@@ -54,11 +48,10 @@ from scamper.environment.rodent import consts as rodent_consts
 from scamper.environment.rodent import maintain_velocity
 
 from scamper.agent.task_transfer.maintain_velocity.checkpoint_utils import (
+    load_decoder_only_checkpoint,
     load_prior_checkpoint,
-    load_distill_prior_checkpoint,
     make_decoder_inference_fn,
     make_prior_inference_fn,
-    make_rgm_inference_fn,
     # Checkpointing / run state
     discover_existing_run_state,
     save_run_state,
@@ -76,8 +69,6 @@ from scamper.agent.task_transfer.maintain_velocity.wrappers import (
     DecoderHighLevelWrapper,
     FlatObsWrapper,
     PriorDecoderHighLevelWrapper,
-    RGMDecoderHighLevelWrapper,
-    PriorRGMDecoderHighLevelWrapper,
 )
 from scamper.agent.task_transfer.maintain_velocity.scratch_networks import (
     make_scratch_ppo_networks,
@@ -103,9 +94,7 @@ def main(cfg: DictConfig) -> None:
         n_devices = 1
         logging.info("Not using GPUs")
 
-    # ----------------------------------------------------------------
-    # Phase 1: Check for preemption recovery
-    # ----------------------------------------------------------------
+    # Check for preemption recovery
     model_path_base = hydra.utils.to_absolute_path(
         cfg.checkpointing.get("model_path", "./model_checkpoints")
     )
@@ -152,24 +141,14 @@ def main(cfg: DictConfig) -> None:
 
     logging.info(f"Model checkpoint path: {model_path}")
 
-    # ----------------------------------------------------------------
-    # Phase 2: Load frozen networks from checkpoint
-    # ----------------------------------------------------------------
+    # Load frozen networks from checkpoint
     prior_checkpoint_path = hydra.utils.to_absolute_path(cfg.checkpoint.path)
 
-    if cfg.mode in ("distill_prior", "rgm_only"):
-        logging.info(f"Loading distill_prior checkpoint from: {prior_checkpoint_path}")
-        (
-            encoder_params,
-            prior_params,
-            decoder_params,
-            rgm_params,
-            normalizer_params,
-            ckpt_cfg,
-        ) = load_distill_prior_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
-    elif cfg.mode == "distill":
+    # `prior_params` defaults to None; only set by modes that load a prior.
+    prior_params = None
+    if cfg.mode == "res_control":
         step_prefix = "DistillNetwork"
-        logging.info(f"Loading distill checkpoint from: {prior_checkpoint_path}")
+        logging.info(f"Loading res_control checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
             prior_params,
@@ -180,38 +159,35 @@ def main(cfg: DictConfig) -> None:
             prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
         )
     else:
-        step_prefix = "PriorNetwork"
-        logging.info(f"Loading mlp_prior checkpoint from: {prior_checkpoint_path}")
+        # mimic_mjx loads encoder+decoder for frozen-decoder transfer; scratch
+        # uses the same load path purely to derive env/network sizes from
+        # ckpt_cfg (the loaded params are unused in scratch mode).
+        logging.info(f"Loading checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
-            prior_params,
             decoder_params,
             normalizer_params,
             ckpt_cfg,
-        ) = load_prior_checkpoint(
-            prior_checkpoint_path, cfg.checkpoint.step, step_prefix=step_prefix
-        )
+        ) = load_decoder_only_checkpoint(prior_checkpoint_path, cfg.checkpoint.step)
 
     latent_size = ckpt_cfg["network_config"]["intention_size"]
     proprio_size = ckpt_cfg["network_config"]["obs_sizes"]["proprioception"]
     logging.info(f"Latent size: {latent_size}, Proprio size: {proprio_size}")
 
-    # Build frozen_networks dict for checkpoint saving
+    # Build frozen_networks dict for checkpoint saving. `prior_params` is None
+    # in mimic_mjx when the source was a PPONetwork mimic-mjx checkpoint, and
+    # in scratch (params are unused).
     frozen_networks = {
         "encoder_params": encoder_params,
         "prior_params": prior_params,
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
-    if cfg.mode in ("distill_prior", "rgm_only"):
-        frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
     decoder_fn = make_decoder_inference_fn(decoder_params, normalizer_params, ckpt_cfg)
 
-    # ----------------------------------------------------------------
-    # Phase 3: Create environments (unchanged)
-    # ----------------------------------------------------------------
+    # Create environments (unchanged)
     env_cfg = maintain_velocity.default_config()
     xml_variant = cfg.env.get("xml_variant", "full-collisions")
     if xml_variant == "limited-collisions":
@@ -245,8 +221,8 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Set actuator type: scratch mode can optionally use PD actuators;
-    # decoder_only, prior_decoder, and distill always use torque (frozen
-    # decoder was trained with torque actuators).
+    # mimic_mjx and res_control always use torque (frozen decoder was trained
+    # with torque actuators).
     if cfg.mode == "scratch":
         env_cfg.torque_actuators = cfg.scratch.get("torque_actuators", True)
         if not env_cfg.torque_actuators:
@@ -259,49 +235,17 @@ def main(cfg: DictConfig) -> None:
     def make_wrapped_env(is_eval: bool = False):
         base_env = maintain_velocity.MaintainVelocity(config=env_cfg)
 
-        if cfg.mode == "decoder_only":
+        if cfg.mode == "mimic_mjx":
             return DecoderHighLevelWrapper(
                 base_env, decoder_fn, latent_size, proprio_size
             )
         elif cfg.mode == "scratch":
             return FlatObsWrapper(base_env)
-        elif cfg.mode == "distill_prior":
+        else:  # res_control
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
-            rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
-            mode_cfg = cfg.distill_prior
-            rgm_logvar = mode_cfg.get("rgm_logvar", None)
-            return PriorRGMDecoderHighLevelWrapper(
-                base_env,
-                prior_fn,
-                rgm_fn,
-                decoder_fn,
-                latent_size,
-                proprio_size,
-                gate_bias=mode_cfg.gate_bias,
-                gate_margin=mode_cfg.get("gate_margin", 0.0),
-                rgm_noise=mode_cfg.rgm_noise,
-                rgm_logvar=rgm_logvar,
-            )
-        elif cfg.mode == "rgm_only":
-            rgm_fn = make_rgm_inference_fn(rgm_params, normalizer_params, ckpt_cfg)
-            mode_cfg = cfg.rgm_only
-            rgm_logvar = mode_cfg.get("rgm_logvar", None)
-            return RGMDecoderHighLevelWrapper(
-                base_env,
-                rgm_fn,
-                decoder_fn,
-                latent_size,
-                proprio_size,
-                rgm_noise=mode_cfg.rgm_noise,
-                rgm_logvar=rgm_logvar,
-            )
-        else:  # prior_decoder or distill
-            prior_fn = make_prior_inference_fn(
-                prior_params, normalizer_params, ckpt_cfg
-            )
-            mode_cfg = cfg.distill if cfg.mode == "distill" else cfg.prior_decoder
+            mode_cfg = cfg.res_control
             return PriorDecoderHighLevelWrapper(
                 base_env,
                 prior_fn,
@@ -318,17 +262,13 @@ def main(cfg: DictConfig) -> None:
     logging.info(f"Training mode: {cfg.mode}")
     logging.info(f"Environment action size (latent): {env.action_size}")
 
-    # ----------------------------------------------------------------
-    # Phase 4: Build config dict and save to model path
-    # ----------------------------------------------------------------
+    # Build config dict and save to model path
     config_dict = OmegaConf.to_container(cfg, resolve=True)
     config_dict["checkpoint_config"] = ckpt_cfg
     with open(Path(model_path) / "config.json", "w") as fp:
         json.dump(config_dict, fp, indent=4, default=str)
 
-    # ----------------------------------------------------------------
-    # Phase 5: Setup normalization and networks
-    # ----------------------------------------------------------------
+    # Setup normalization and networks
     normalize = lambda x, y: x
     if cfg.train.normalize_observations:
         normalize = running_statistics.normalize
@@ -424,9 +364,7 @@ def main(cfg: DictConfig) -> None:
         make_logging_policy = make_logging_inference_fn(ppo_network)
         jit_logging_inference_fn = jax.jit(make_logging_policy(deterministic=True))
 
-    # ----------------------------------------------------------------
-    # Phase 6: If resuming, load Brax params from task transfer checkpoint
-    # ----------------------------------------------------------------
+    # If resuming, load Brax params from task transfer checkpoint
     if existing_run_state is not None:
         # Build an abstract brax_params tuple for Orbax structure matching.
         # Brax params are (normalizer_params, policy_params, value_params).
@@ -459,9 +397,7 @@ def main(cfg: DictConfig) -> None:
         )
         logging.info("Loaded Brax params for resume")
 
-    # ----------------------------------------------------------------
-    # Phase 7: Initialize wandb (with resume support)
-    # ----------------------------------------------------------------
+    # Initialize wandb (with resume support)
     if wandb_run_id_to_resume is not None:
         wandb_run_id = wandb_run_id_to_resume
         wandb.init(
@@ -482,9 +418,7 @@ def main(cfg: DictConfig) -> None:
             notes=f"checkpoint: {cfg.checkpoint.path}, mode: {cfg.mode}",
         )
 
-    # ----------------------------------------------------------------
-    # Phase 8: Save run state and create checkpoint infrastructure
-    # ----------------------------------------------------------------
+    # Save run state and create checkpoint infrastructure
     checkpointing_enabled = cfg.checkpointing.get("enabled", True)
 
     if checkpointing_enabled:
@@ -517,9 +451,7 @@ def main(cfg: DictConfig) -> None:
         checkpoint_callback = None
         ckpt_mgr = None
 
-    # ----------------------------------------------------------------
-    # Phase 9: Define policy_params_fn with checkpoint saving
-    # ----------------------------------------------------------------
+    # Define policy_params_fn with checkpoint saving
     eval_counter = [initial_eval_counter]
 
     def policy_params_fn(current_step, make_policy, params, jit_logging_inference_fn):
@@ -571,9 +503,7 @@ def main(cfg: DictConfig) -> None:
 
         eval_counter[0] += 1
 
-    # ----------------------------------------------------------------
-    # Phase 10: Build training config and run
-    # ----------------------------------------------------------------
+    # Build training config and run
     training_params = {
         "num_timesteps": remaining_timesteps,
         "episode_length": cfg.train.episode_length,
@@ -620,9 +550,7 @@ def main(cfg: DictConfig) -> None:
         ),
     )
 
-    # ----------------------------------------------------------------
-    # Phase 11: Save final checkpoint and cleanup
-    # ----------------------------------------------------------------
+    # Save final checkpoint and cleanup
     if checkpointing_enabled and ckpt_mgr is not None:
         training_metadata = {
             "completed_timesteps": cfg.train.num_timesteps,

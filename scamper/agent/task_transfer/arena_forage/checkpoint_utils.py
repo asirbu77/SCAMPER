@@ -1,17 +1,13 @@
-"""Checkpoint utilities for task transfer training.
-
-This module provides functions to:
-- Load prior, decoder, and encoder parameters from mlp_prior checkpoints
-- Create inference functions for the frozen prior and decoder networks
-- Save and load task transfer training checkpoints (frozen networks + PPO state)
-- Manage run state files for SLURM preemption recovery
-
-Handles both legacy flat normalizer format and new dict normalizer format.
+"""Arena-forage task-transfer checkpoint helpers: load frozen upstream networks,
+build inference fns, save/restore the task-transfer checkpoint, manage run-state
+files for SLURM preemption recovery. Handles both legacy flat and dict
+normalizer formats.
 """
 
 import hashlib
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Tuple
@@ -23,13 +19,13 @@ from brax.training import distribution
 from brax.training.acme import running_statistics, specs
 from omegaconf import DictConfig, OmegaConf
 
-from scamper.agent import checkpointing
-from scamper.agent.distill_prior.distill_prior_networks import (
-    create_abstract_distill_prior_policy,
+from scamper.utils import checkpointing
+from scamper.agent.behavior_prior.behavior_prior_networks import (
+    create_abstract_behavior_prior_policy,
 )
 from scamper.agent.imitation import intention_network
-from scamper.agent.mlp_prior.prior_networks import Prior
-from scamper.agent.observation_utils import (
+from scamper.agent.imitation.prior import Prior
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     convert_flat_to_dict_normalizer,
 )
@@ -167,7 +163,7 @@ def load_distill_prior_checkpoint(
 
     rgm_hidden_layer_sizes = tuple(cfg.network_config.rgm_layer_sizes)
 
-    abstract_policy = create_abstract_distill_prior_policy(
+    abstract_policy = create_abstract_behavior_prior_policy(
         OmegaConf.to_container(cfg), rgm_hidden_layer_sizes
     )
 
@@ -193,6 +189,113 @@ def load_distill_prior_checkpoint(
         normalizer_params,
         OmegaConf.to_container(cfg),
     )
+
+
+def _has_step_prefix_dir(checkpoint_path: str, prefix: str) -> bool:
+    """Return True if checkpoint_path contains any step-dir with the given prefix."""
+    try:
+        entries = os.listdir(checkpoint_path)
+    except (OSError, FileNotFoundError):
+        return False
+    return any(e.startswith(prefix + "_") for e in entries)
+
+
+def _create_abstract_imitation_policy(cfg: OmegaConf) -> Tuple[Any, Any]:
+    """Abstract pytree for PPONetwork-prefix mimic-mjx / train_imitation checkpoints.
+
+    Mirrors the saved tree structure produced by
+    ``intention_network.IntentionNetwork.init`` inside ``train_mimic_mjx``:
+    ``{params: {encoder, decoder}}`` plus a normalizer state. No "prior" key.
+    """
+    obs_sizes = dict(cfg.network_config.obs_sizes)
+    reference_obs_size = obs_sizes["imitation_target"]
+    proprioceptive_obs_size = obs_sizes["proprioception"]
+    latent_size = cfg.network_config.intention_size
+    action_size = cfg.network_config.action_size
+    encoder_layer_sizes = tuple(cfg.network_config.encoder_layer_sizes)
+    decoder_layer_sizes = tuple(cfg.network_config.decoder_layer_sizes)
+    action_param_size = action_size * 2
+
+    intention_net = intention_network.IntentionNetwork(
+        encoder_layers=list(encoder_layer_sizes),
+        decoder_layers=list(decoder_layer_sizes) + [action_param_size],
+        latents=latent_size,
+    )
+    rng = jax.random.PRNGKey(0)
+    dummy_obs = {
+        "imitation_target": jnp.zeros((1, reference_obs_size)),
+        "proprioception": jnp.zeros((1, proprioceptive_obs_size)),
+    }
+    init_params = intention_net.init(rng, dummy_obs, rng)
+
+    normalizer_state = DictRunningStatisticsState(
+        imitation_target=running_statistics.init_state(
+            specs.Array(reference_obs_size, jnp.dtype("float32"))
+        ),
+        proprioception=running_statistics.init_state(
+            specs.Array(proprioceptive_obs_size, jnp.dtype("float32"))
+        ),
+    )
+    return (normalizer_state, init_params)
+
+
+def load_decoder_only_checkpoint(
+    checkpoint_path: str,
+    step: int | None = None,
+) -> Tuple[Dict, Dict, DictRunningStatisticsState, Dict]:
+    """Load encoder + decoder for ``mode == "mimic_mjx"`` task transfer.
+
+    Compatible with two checkpoint flavors:
+
+    - **PPONetwork prefix** (mimic-mjx / legacy train_imitation): saved tree
+      is ``{params: {encoder, decoder}}``.
+    - **PriorNetwork prefix** (legacy train_prior): saved tree is
+      ``{params: {encoder, decoder, prior}}`` — restored fully, the prior is
+      then dropped.
+
+    Args:
+        checkpoint_path: Path to checkpoint directory.
+        step: Specific step to load. None = latest.
+
+    Returns:
+        Tuple of (encoder_params, decoder_params, normalizer_params,
+        config_dict).
+    """
+    # Try PPONetwork first (new mimic-mjx / legacy train_imitation)
+    if _has_step_prefix_dir(checkpoint_path, "PPONetwork"):
+        step_prefix = "PPONetwork"
+        mgr_options = ocp.CheckpointManagerOptions(
+            create=False, step_prefix=step_prefix
+        )
+        with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as ckpt_mgr:
+            if step is None:
+                step = ckpt_mgr.latest_step()
+            cfg = ckpt_mgr.restore(
+                step,
+                args=ocp.args.Composite(config=ocp.args.JsonRestore()),
+            )["config"]
+
+        cfg_obj = OmegaConf.create(cfg)
+        abstract_policy = _create_abstract_imitation_policy(cfg_obj)
+
+        with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as ckpt_mgr:
+            policy_params = ckpt_mgr.restore(
+                step,
+                args=ocp.args.Composite(
+                    policy=ocp.args.StandardRestore(abstract_policy)
+                ),
+            )["policy"]
+
+        normalizer_params, network_params = policy_params
+        encoder_params = network_params["params"]["encoder"]
+        decoder_params = network_params["params"]["decoder"]
+        return encoder_params, decoder_params, normalizer_params, cfg
+
+    # Fall back to PriorNetwork (legacy train_prior); drop the prior on return.
+    encoder_params, _prior_params, decoder_params, normalizer_params, ckpt_cfg = (
+        load_prior_checkpoint(checkpoint_path, step=step, step_prefix="PriorNetwork")
+    )
+    return encoder_params, decoder_params, normalizer_params, ckpt_cfg
 
 
 def _create_abstract_prior_policy_dict(cfg: OmegaConf) -> Tuple[Any, Any]:
@@ -239,6 +342,113 @@ def _create_abstract_prior_policy_dict(cfg: OmegaConf) -> Tuple[Any, Any]:
     )
 
     return (normalizer_state, combined_params)
+
+
+def _has_step_prefix_dir(checkpoint_path: str, prefix: str) -> bool:
+    """Return True if checkpoint_path contains any step-dir with the given prefix."""
+    try:
+        entries = os.listdir(checkpoint_path)
+    except (OSError, FileNotFoundError):
+        return False
+    return any(e.startswith(prefix + "_") for e in entries)
+
+
+def _create_abstract_imitation_policy(cfg: OmegaConf) -> Tuple[Any, Any]:
+    """Abstract pytree for PPONetwork-prefix mimic-mjx / train_imitation checkpoints.
+
+    Mirrors the saved tree structure produced by
+    ``intention_network.IntentionNetwork.init`` inside ``train_mimic_mjx``:
+    ``{params: {encoder, decoder}}`` plus a normalizer state. No "prior" key.
+    """
+    obs_sizes = dict(cfg.network_config.obs_sizes)
+    reference_obs_size = obs_sizes["imitation_target"]
+    proprioceptive_obs_size = obs_sizes["proprioception"]
+    latent_size = cfg.network_config.intention_size
+    action_size = cfg.network_config.action_size
+    encoder_layer_sizes = tuple(cfg.network_config.encoder_layer_sizes)
+    decoder_layer_sizes = tuple(cfg.network_config.decoder_layer_sizes)
+    action_param_size = action_size * 2
+
+    intention_net = intention_network.IntentionNetwork(
+        encoder_layers=list(encoder_layer_sizes),
+        decoder_layers=list(decoder_layer_sizes) + [action_param_size],
+        latents=latent_size,
+    )
+    rng = jax.random.PRNGKey(0)
+    dummy_obs = {
+        "imitation_target": jnp.zeros((1, reference_obs_size)),
+        "proprioception": jnp.zeros((1, proprioceptive_obs_size)),
+    }
+    init_params = intention_net.init(rng, dummy_obs, rng)
+
+    normalizer_state = DictRunningStatisticsState(
+        imitation_target=running_statistics.init_state(
+            specs.Array(reference_obs_size, jnp.dtype("float32"))
+        ),
+        proprioception=running_statistics.init_state(
+            specs.Array(proprioceptive_obs_size, jnp.dtype("float32"))
+        ),
+    )
+    return (normalizer_state, init_params)
+
+
+def load_decoder_only_checkpoint(
+    checkpoint_path: str,
+    step: int | None = None,
+) -> Tuple[Dict, Dict, DictRunningStatisticsState, Dict]:
+    """Load encoder + decoder for ``mode == "mimic_mjx"`` task transfer.
+
+    Compatible with two checkpoint flavors:
+
+    - **PPONetwork prefix** (mimic-mjx / legacy train_imitation): saved tree
+      is ``{params: {encoder, decoder}}``.
+    - **PriorNetwork prefix** (legacy train_prior): saved tree is
+      ``{params: {encoder, decoder, prior}}`` — restored fully, the prior is
+      then dropped.
+
+    Args:
+        checkpoint_path: Path to checkpoint directory.
+        step: Specific step to load. None = latest.
+
+    Returns:
+        Tuple of (encoder_params, decoder_params, normalizer_params,
+        config_dict).
+    """
+    # Try PPONetwork first (new mimic-mjx / legacy train_imitation)
+    if _has_step_prefix_dir(checkpoint_path, "PPONetwork"):
+        step_prefix = "PPONetwork"
+        mgr_options = ocp.CheckpointManagerOptions(
+            create=False, step_prefix=step_prefix
+        )
+        with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as ckpt_mgr:
+            if step is None:
+                step = ckpt_mgr.latest_step()
+            cfg = ckpt_mgr.restore(
+                step,
+                args=ocp.args.Composite(config=ocp.args.JsonRestore()),
+            )["config"]
+
+        cfg_obj = OmegaConf.create(cfg)
+        abstract_policy = _create_abstract_imitation_policy(cfg_obj)
+
+        with ocp.CheckpointManager(checkpoint_path, options=mgr_options) as ckpt_mgr:
+            policy_params = ckpt_mgr.restore(
+                step,
+                args=ocp.args.Composite(
+                    policy=ocp.args.StandardRestore(abstract_policy)
+                ),
+            )["policy"]
+
+        normalizer_params, network_params = policy_params
+        encoder_params = network_params["params"]["encoder"]
+        decoder_params = network_params["params"]["decoder"]
+        return encoder_params, decoder_params, normalizer_params, cfg
+
+    # Fall back to PriorNetwork (legacy train_prior); drop the prior on return.
+    encoder_params, _prior_params, decoder_params, normalizer_params, ckpt_cfg = (
+        load_prior_checkpoint(checkpoint_path, step=step, step_prefix="PriorNetwork")
+    )
+    return encoder_params, decoder_params, normalizer_params, ckpt_cfg
 
 
 def _create_abstract_prior_policy_flat(cfg: OmegaConf) -> Tuple[Any, Any]:
@@ -448,7 +658,7 @@ def make_prior_inference_fn(
     return prior_fn
 
 
-def make_rgm_inference_fn(
+def make_behavior_prior_inference_fn(
     rgm_params: Dict,
     normalizer_params: DictRunningStatisticsState,
     config: Dict,
@@ -475,7 +685,7 @@ def make_rgm_inference_fn(
 
     proprio_normalizer = normalizer_params.proprioception
 
-    def rgm_fn(proprio: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def behavior_prior_fn(proprio: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Apply RGM to proprioceptive observations.
 
         Args:
@@ -490,12 +700,10 @@ def make_rgm_inference_fn(
 
         return mean, logvar
 
-    return rgm_fn
+    return behavior_prior_fn
 
 
-# ---------------------------------------------------------------------------
 # Task transfer checkpointing and preemption recovery
-# ---------------------------------------------------------------------------
 
 
 def hash_task_transfer_config(cfg: DictConfig) -> str:
@@ -522,18 +730,12 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
         "env": OmegaConf.to_container(cfg.env, resolve=True),
         "exp_name": cfg.logging.exp_name,
     }
-    if cfg.mode == "prior_decoder":
-        hashable["prior_decoder"] = OmegaConf.to_container(
-            cfg.prior_decoder, resolve=True
+    if cfg.mode == "res_control":
+        hashable["res_control"] = OmegaConf.to_container(cfg.res_control, resolve=True)
+    elif cfg.mode == "prior_gating":
+        hashable["prior_gating"] = OmegaConf.to_container(
+            cfg.prior_gating, resolve=True
         )
-    elif cfg.mode == "distill":
-        hashable["distill"] = OmegaConf.to_container(cfg.distill, resolve=True)
-    elif cfg.mode == "distill_prior":
-        hashable["distill_prior"] = OmegaConf.to_container(
-            cfg.distill_prior, resolve=True
-        )
-    elif cfg.mode == "rgm_only":
-        hashable["rgm_only"] = OmegaConf.to_container(cfg.rgm_only, resolve=True)
     cfg_str = json.dumps(hashable, sort_keys=True, default=str)
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]
 

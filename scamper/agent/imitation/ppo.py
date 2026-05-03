@@ -11,8 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Modifications copyright 2026 SCAMPER authors. Adapted from Brax PPO with
+# changes for VAE-style intention networks, frozen-decoder transfer, train/test
+# split evaluation, KL scheduling, and SLURM preemption-recovery checkpointing.
 
-"""Proximal Policy Optimization (PPO) training for VNL imitation learning.
+"""Proximal Policy Optimization (PPO) training for imitation learning.
 
 This module implements PPO training with support for:
 - Intention-based policy networks (VAE-style latent encoding)
@@ -21,7 +25,7 @@ This module implements PPO training with support for:
 - Train/test split evaluation
 - KL divergence scheduling for VAE training stability
 
-Based on Brax's PPO implementation with modifications for VNL tracking tasks.
+Based on Brax's PPO implementation with modifications for tracking tasks.
 """
 
 import functools
@@ -43,9 +47,9 @@ from brax.training.types import Params, PRNGKey
 from mujoco_playground import wrapper as mp_wrapper
 from optax.transforms import freeze
 
-from scamper.agent import checkpointing, gradients, network_masks
+from scamper.utils import checkpointing, gradients, network_masks
 from scamper.agent.imitation import losses, ppo_networks
-from scamper.agent.observation_utils import (
+from scamper.utils.observation_utils import (
     DictRunningStatisticsState,
     get_obs_sizes,
     init_dict_normalizer,

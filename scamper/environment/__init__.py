@@ -6,11 +6,7 @@ from ml_collections import config_dict
 
 from scamper.environment.rodent import imitation as rodent_imitation
 from scamper.environment.rodent import rearing as rodent_rearing
-from scamper.environment.rodent import bowl_escape as rodent_bowl_escape
 from scamper.environment.rodent import maintain_velocity as rodent_maintain_velocity
-from scamper.environment.rodent import (
-    maintain_multi_velocity as rodent_maintain_multi_velocity,
-)
 from scamper.environment.rodent import arena_forage as rodent_arena_forage
 
 # Unified wrappers and reference clips
@@ -21,18 +17,14 @@ from scamper.environment.reference_clips import ReferenceClips
 _envs = {
     "RodentImitation": rodent_imitation.Imitation,
     "RodentRearing": rodent_rearing.Rearing,
-    "RodentBowlEscape": rodent_bowl_escape.BowlEscape,
     "RodentMaintainVelocity": rodent_maintain_velocity.MaintainVelocity,
-    "RodentMaintainMultiVelocity": rodent_maintain_multi_velocity.MaintainMultiVelocity,
     "RodentArenaForage": rodent_arena_forage.ArenaForage,
 }
 
 _cfgs = {
     "RodentImitation": rodent_imitation.default_config,
     "RodentRearing": rodent_rearing.default_config,
-    "RodentBowlEscape": rodent_bowl_escape.default_config,
     "RodentMaintainVelocity": rodent_maintain_velocity.default_config,
-    "RodentMaintainMultiVelocity": rodent_maintain_multi_velocity.default_config,
     "RodentArenaForage": rodent_arena_forage.default_config,
 }
 

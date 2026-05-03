@@ -1,49 +1,27 @@
-"""Unified reference clips loader for motion capture data.
+"""Reference clips loader for motion-capture data, with autodetection of two
+on-disk H5 layouts.
 
-This module provides a single `ReferenceClips` class that loads motion capture
-reference data from HDF5 files. It automatically detects the H5 format and
-provides a consistent API regardless of the underlying data structure.
+Layouts:
 
-Supported H5 Formats
---------------------
-1. **Named-array format** (preferred, used by fruitfly):
-   - Root state: `position`, `velocity`, `quaternion`, `angular_velocity`
-   - Joint state: `joints`, `joints_velocity`
-   - Body state: `body_positions`, `body_quaternions`
-   - Data may be under `/all_clips/` group or at root level
+1. **Named-array format**:
+   - Root state: ``position``, ``velocity``, ``quaternion``, ``angular_velocity``
+   - Joint state: ``joints``, ``joints_velocity``
+   - Body state: ``body_positions``, ``body_quaternions``
+   - Data may be under ``/all_clips/`` or at root level.
 
-2. **Legacy flat-array format** (used by rodent):
-   - State vectors: `qpos`, `qvel` (flat arrays containing root + joints)
-   - Body state: `xpos`, `xquat`
-   - Metadata: `names_qpos`, `names_xpos`, `config`
-   - Data requires reshaping from (n_total_frames, ...) to (n_clips, n_frames, ...)
+2. **Legacy flat-array format** (rodent reference data):
+   - State vectors: ``qpos``, ``qvel`` (root + joints concatenated)
+   - Body state: ``xpos``, ``xquat``
+   - Metadata: ``names_qpos``, ``names_xpos``, ``config``
+   - Reshaped from ``(n_total_frames, ...)`` to ``(n_clips, n_frames, ...)`` on load.
 
-Usage
------
->>> from scamper.environment.reference_clips import ReferenceClips
->>>
->>> # Load reference clips (format auto-detected)
->>> clips = ReferenceClips(
-...     data_path="path/to/reference_clips.h5",
-...     n_frames_per_clip=250,
-... )
->>>
->>> # Access data using consistent API
->>> clips.qpos.shape        # (n_clips, n_frames, n_dof)
->>> clips.joints.shape      # (n_clips, n_frames, n_joints)
->>> clips.root_position     # (n_clips, n_frames, 3)
->>>
->>> # Slice operations
->>> frame = clips.at(clip=0, frame=10)      # Single frame
->>> seq = clips.slice(clip=0, start_frame=0, length=50)  # Frame sequence
->>>
->>> # Train/test split
->>> train_clips, test_clips = clips.split(train_ratio=0.8, seed=42)
+Example::
 
-See Also
---------
-- `scamper.environment.wrappers` : Environment wrappers
-- `scamper.environment.registry` : High-level environment loading API
+    clips = ReferenceClips(data_path="...", n_frames_per_clip=250)
+    clips.qpos.shape         # (n_clips, n_frames, n_dof)
+    frame = clips.at(clip=0, frame=10)
+    seq = clips.slice(clip=0, start_frame=0, length=50)
+    train, test = clips.split(train_ratio=0.8, seed=42)
 """
 
 import copy
@@ -197,7 +175,7 @@ class ReferenceClips:
         joint_names: Optional[list[str]],
         body_names: Optional[list[str]],
     ) -> None:
-        """Load named-array format (fruitfly-style)."""
+        """Load named-array format."""
         self._is_legacy_format = False
 
         for k in self._NAMED_ARRAYS:

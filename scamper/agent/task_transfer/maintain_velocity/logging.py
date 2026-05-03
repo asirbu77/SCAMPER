@@ -1,7 +1,5 @@
-"""Wandb logging utilities for maintain_velocity task transfer training.
-
-This module provides functions for logging training metrics, rollout videos,
-and reward breakdowns to Weights & Biases.
+"""W&B logging for maintain_velocity: metrics, rollout videos, reward
+breakdowns.
 """
 
 import logging
@@ -52,8 +50,7 @@ def rollout_logging_fn(
         render_every: Render video every N evaluation steps.
         eval_count: Current evaluation count (0-indexed).
 
-    Note:
-        All metrics are logged with commit=False to batch with other logs.
+    Metrics are logged with commit=False so the caller can batch them.
     """
     rng = jax.random.PRNGKey(current_step)
     reset_rng, act_rng = jax.random.split(rng)
