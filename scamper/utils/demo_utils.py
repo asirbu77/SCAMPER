@@ -574,18 +574,54 @@ def run_proprio_rollout(env, policy_fn, starting_state, num_steps, rng_key):
 
 
 def rollout_distill_motion_prior_grid(
-    env, reference_clips, policy_fn, clip_indices, num_steps, seed=42
+    env, reference_clips, policy_fn, clip_indices, num_steps, seed=42, chunk_size=None
 ):
-    """Run policy_fn on each clip's start-pose; return [N, T, nq] qpos array."""
-    qpos_by_clip = {}
-    for ci in clip_indices:
-        rng = random.PRNGKey(seed + int(ci))
+    """vmap'd rollout from each clip's start-pose. Returns {clip_idx: [T, nq]}.
+
+    All clips run in parallel under a single jitted ``jax.vmap`` + ``lax.scan``.
+    If memory is tight, set ``chunk_size`` to slice the vmap into batches; pick a
+    divisor of ``len(clip_indices)`` so every chunk has the same shape (otherwise
+    jax recompiles the trailing chunk).
+    """
+
+    def step_fn(carry, _):
+        state, key = carry
+        key, action_key = random.split(key)
+        if isinstance(state.obs, dict) or hasattr(state.obs, "get"):
+            proprio = flatten_obs_dict(state.obs)["proprioception"]
+        else:
+            proprio = state.obs
+        action, _ = policy_fn(proprio, action_key)
+        next_state = env.step(state, action)
+        return (next_state, key), next_state.data.qpos
+
+    def rollout_one(clip_idx, rng):
         rng_init, rng_rollout = random.split(rng)
-        start = make_clip_initial_state(env, reference_clips, rng_init, ci)
-        all_states = run_proprio_rollout(env, policy_fn, start, num_steps, rng_rollout)
-        qpos_by_clip[ci] = np.asarray(all_states.data.qpos)
-        print(f"  clip {ci}: qpos {qpos_by_clip[ci].shape}")
-    return qpos_by_clip
+        start = make_clip_initial_state(env, reference_clips, rng_init, clip_idx)
+        (_, _), qpos_seq = jax.lax.scan(
+            step_fn, (start, rng_rollout), None, length=num_steps
+        )
+        return qpos_seq
+
+    rollout_batch = jax.jit(jax.vmap(rollout_one))
+
+    n = len(clip_indices)
+    if chunk_size is None or chunk_size >= n:
+        chunk_size = n
+
+    clip_idxs_all = jnp.asarray([int(c) for c in clip_indices], dtype=jnp.int32)
+    rngs_all = jax.vmap(lambda i: random.PRNGKey(seed + i))(clip_idxs_all)
+
+    qpos_chunks = []
+    for start in range(0, n, chunk_size):
+        end = min(start + chunk_size, n)
+        qpos = rollout_batch(clip_idxs_all[start:end], rngs_all[start:end])
+        jax.tree_util.tree_map(lambda x: x.block_until_ready(), qpos)
+        qpos_chunks.append(np.asarray(qpos))
+        print(f"  vmap rollout [{start}:{end}/{n}]: qpos {qpos_chunks[-1].shape}")
+
+    qpos_arr = np.concatenate(qpos_chunks, axis=0)  # [N, T, nq]
+    return {int(c): qpos_arr[i] for i, c in enumerate(clip_indices)}
 
 
 # ---- walk-rear ----
