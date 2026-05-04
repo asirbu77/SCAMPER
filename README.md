@@ -218,6 +218,19 @@ SCAMPER / MIMIC-MJX / scratch checkpoints. It's the fastest way to see what
 each pipeline stage produces.
 
 
+## Third-party data
+
+`data/empirical_rat/df_phases.h5` is redistributed from
+[`dannerlab/rat-sci-locomotion`](https://github.com/dannerlab/rat-sci-locomotion)
+under the
+[Creative Commons Attribution-ShareAlike 4.0 International License (CC BY-SA 4.0)](https://creativecommons.org/licenses/by-sa/4.0/)
+and is associated with Danner et al., *Experimental Neurology* 368, 114496
+(2023), doi: [10.1016/j.expneurol.2023.114496](https://doi.org/10.1016/j.expneurol.2023.114496).
+See [`data/empirical_rat/README.md`](data/empirical_rat/README.md) for full
+attribution. The CC BY-SA 4.0 terms apply to that file (and any adapted
+version of it) independently of this repository's Apache-2.0 license.
+
+
 ## License
 
 Distributed under the Apache License, Version 2.0. See
