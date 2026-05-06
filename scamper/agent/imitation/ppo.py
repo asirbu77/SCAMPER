@@ -323,7 +323,7 @@ def train(
     env_step_per_training_step = (
         batch_size * unroll_length * num_minibatches * action_repeat
     )
-    # TODO (Scott:) this will be dependent of the eval interval,
+    # TODO: this will be dependent of the eval interval,
     # it could be confusing when loading a checkpoint
     # and num_evals is not the same as the one used for training.
     num_evals_after_init = max(num_evals - 1, 1)

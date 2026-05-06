@@ -36,7 +36,7 @@ def default_config() -> config_dict.ConfigDict:
         reference_data_path=consts.IMITATION_REFERENCE_PATH,
         mocap_hz=50,
         clip_length=250,
-        clip_set="all",  # NOTE: Charles added keep_clips_idx which basically is the same as this for indices to reduce memory usage
+        clip_set="all",  # NOTE: keep_clips_idx is basically the same as this for indices to reduce memory usage
         reference_length=5,
         start_frame_range=[0, 44],
         qvel_init="zeros",

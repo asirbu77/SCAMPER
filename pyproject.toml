@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scamper"
-authors = [{name = "Aidan Sirbu", email = "aidan.sirbu@mail.mcgill.ca"}]
+authors = [{name = "Anonymous"}]
 description=  "SCAMPER: A Python package for fast reinforcement learning-based imitation learning tracking for agents"
 requires-python = ">=3.12,<3.13"
 keywords = ["tracking", "imitation learning", "deep learning"]
@@ -61,9 +61,6 @@ dev = [
     "twine",
     "build",
     ]
-
-[project.urls]
-Repository = "https://github.com/asirbu77/SCAMPER"
 
 [tool.hatch.version]
 source = "vcs"

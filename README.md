@@ -1,14 +1,6 @@
 # SCAMPER
 
-SCAMPER trains physically-grounded control policies for biomechanical rodent
-models by combining motion-capture imitation, hierarchical distillation, and
-task-transfer reinforcement learning. The repository implements a four-stage
-pipeline — expert PPO → DAgger distillation into a VAE student → behavior-prior
-training → task-specific transfer — plus an alternate one-shot mimic-mjx PPO
-pipeline that skips distillation. Environments are built on
-[MuJoCo](https://github.com/google-deepmind/mujoco) /
-[mujoco_playground](https://github.com/google-deepmind/mujoco_playground), with
-training accelerated via [Brax](https://github.com/google/brax) PPO on JAX.
+SCAMPER trains physically-grounded control policies for biomechanical rodent models by combining motion-capture imitation, hierarchical distillation, and task-transfer reinforcement learning. The repository implements a four-stage pipeline — expert PPO → DAgger distillation into a VAE student → behavior-prior training → task-specific transfer — plus an alternate one-shot mimic-mjx PPO pipeline that skips distillation. Environments are built on [MuJoCo](https://github.com/google-deepmind/mujoco) / [mujoco_playground](https://github.com/google-deepmind/mujoco_playground), with training accelerated via [Brax](https://github.com/google/brax) PPO on JAX.
 
 
 ## Installation
@@ -28,11 +20,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 (Or install via your package manager: `brew install uv`, `pip install uv`,
 etc. See the [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/).)
 
-### 2. Clone and create a virtual environment
+### 2. Set up a virtual environment
+
+From the extracted repository root:
 
 ```bash
-git clone https://github.com/asirbu77/SCAMPER.git
-cd SCAMPER
 uv venv
 ```
 
@@ -69,16 +61,6 @@ python -c "import jax; print('JAX', jax.__version__, 'devices', jax.devices())"
 GPU installs should list `cuda` or `gpu` devices.
 
 
-## Download the data
-
-Reference motion-capture clips and pretrained checkpoints live in a
-HuggingFace dataset. Pull them into `./data` with:
-
-```bash
-python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='sirbu/SCAMPER', repo_type='dataset', local_dir='./data')"
-```
-
-
 ## Repository layout
 
 ```
@@ -98,8 +80,6 @@ scamper/
 ├── scripts/                     # Auxiliary scripts (rollout dataset, IS, ...)
 └── utils/                       # Checkpointing, observation utils, gradients,
                                  # network masks, wandb logging, demo helpers
-notebooks/
-└── scamper_demo.ipynb           # End-to-end demo (rollouts + videos per stage)
 ```
 
 
@@ -207,28 +187,6 @@ python -m scamper.train_mimic_mjx
 
 The resulting checkpoint plugs into task transfer's `mimic_mjx` mode in place
 of a distill_expert teacher.
-
-
-## Demo notebook
-
-[`notebooks/scamper_demo.ipynb`](notebooks/scamper_demo.ipynb) walks through
-each stage with cached rollouts and rendered videos: imitation grid, behavior
-prior, motion prior (low/high noise), and per-task transfer comparisons across
-SCAMPER / MIMIC-MJX / scratch checkpoints. It's the fastest way to see what
-each pipeline stage produces.
-
-
-## Third-party data
-
-`data/empirical_rat/df_phases.h5` is redistributed from
-[`dannerlab/rat-sci-locomotion`](https://github.com/dannerlab/rat-sci-locomotion)
-under the
-[Creative Commons Attribution-ShareAlike 4.0 International License (CC BY-SA 4.0)](https://creativecommons.org/licenses/by-sa/4.0/)
-and is associated with Danner et al., *Experimental Neurology* 368, 114496
-(2023), doi: [10.1016/j.expneurol.2023.114496](https://doi.org/10.1016/j.expneurol.2023.114496).
-See [`data/empirical_rat/README.md`](data/empirical_rat/README.md) for full
-attribution. The CC BY-SA 4.0 terms apply to that file (and any adapted
-version of it) independently of this repository's Apache-2.0 license.
 
 
 ## License
