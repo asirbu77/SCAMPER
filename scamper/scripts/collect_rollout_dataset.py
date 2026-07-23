@@ -414,29 +414,44 @@ def create_batched_rollout_fn(
             # Get action and extras (including sampled latent) from policy
             action, extras = policy_fn(obs, action_key)
             z = extras["intention"]
+            # Capture the prior mean (mu) the sampled latent was drawn around,
+            # so the injected-noise variance can be measured directly as
+            # Var(z) - Var(mu) rather than estimated via lag-1 autocovariance.
+            # `extras` is a static Python dict at trace time, so `.get`
+            # selects the right traced array. Prior rollouts expose
+            # "prior_mean", behavior-prior (RGM) rollouts "behavior_prior_mean";
+            # policies without a distinct mean (teacher, encoder-decoder) fall
+            # back to z, so their `_means` equal their `_latents`.
+            mu = extras.get(
+                "prior_mean", extras.get("behavior_prior_mean", z)
+            )
 
             # Step environment
             next_state = jit_step(state, action)
 
-            return (next_state, key), (next_state.data.qpos, z)
+            return (next_state, key), (next_state.data.qpos, z, mu)
 
         # Run rollout for num_steps - 1 (we already have initial qpos)
         initial_carry = (state, rollout_key)
-        _, (qpos_trajectory, latents_trajectory) = jax.lax.scan(
+        _, (qpos_trajectory, latents_trajectory, means_trajectory) = jax.lax.scan(
             step_fn, initial_carry, None, length=num_steps - 1
         )
 
-        # Prepend initial qpos and zeros for latent (no policy call at t=0)
+        # Prepend initial qpos and zeros for latent/mean (no policy call at t=0)
         qpos_trajectory = jnp.concatenate(
             [initial_qpos[None, :], qpos_trajectory], axis=0
         )
         latents_trajectory = jnp.concatenate(
             [jnp.zeros((1, intention_size)), latents_trajectory], axis=0
         )
+        means_trajectory = jnp.concatenate(
+            [jnp.zeros((1, intention_size)), means_trajectory], axis=0
+        )
 
         return (
             qpos_trajectory,
             latents_trajectory,
+            means_trajectory,
         )
 
     # Vmap over batch of clips
@@ -458,7 +473,7 @@ def collect_rollouts(
     is_prior_policy: bool,
     rng_key: jax.Array,
     desc: str = "Collecting rollouts",
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Collect rollouts for all clips.
 
     Args:
@@ -476,8 +491,11 @@ def collect_rollouts(
         desc: Progress bar description.
 
     Returns:
-        Tuple of (qpos, latents) arrays with shapes
-        (num_clips, num_steps, qpos_dim) and (num_clips, num_steps, intention_size).
+        Tuple of (qpos, latents, means) arrays with shapes
+        (num_clips, num_steps, qpos_dim) and, for the latter two,
+        (num_clips, num_steps, intention_size). `means` holds the prior mean
+        the latent was sampled around (equal to `latents` for policies without
+        a distinct mean, e.g. teacher and encoder-decoder).
     """
     batched_rollout = create_batched_rollout_fn(
         env,
@@ -491,6 +509,7 @@ def collect_rollouts(
 
     all_qpos = []
     all_latents = []
+    all_means = []
     num_batches = (num_clips + batch_size - 1) // batch_size
 
     for batch_idx in tqdm(range(num_batches), desc=desc):
@@ -514,15 +533,20 @@ def collect_rollouts(
         batch_keys = random.split(batch_key, actual_batch_size)
 
         # Run batched rollouts
-        qpos_batch, latents_batch = batched_rollout(
+        qpos_batch, latents_batch, means_batch = batched_rollout(
             initial_qpos_batch, clip_indices, batch_keys
         )
 
         # Transfer to CPU and append
         all_qpos.append(np.array(qpos_batch))
         all_latents.append(np.array(latents_batch))
+        all_means.append(np.array(means_batch))
 
-    return np.concatenate(all_qpos, axis=0), np.concatenate(all_latents, axis=0)
+    return (
+        np.concatenate(all_qpos, axis=0),
+        np.concatenate(all_latents, axis=0),
+        np.concatenate(all_means, axis=0),
+    )
 
 
 def get_original_qpos(reference_clips: ReferenceClips) -> np.ndarray:
@@ -542,6 +566,7 @@ def save_results(
     original_qpos: np.ndarray,
     results: Dict[str, np.ndarray],
     latents_results: Dict[str, np.ndarray],
+    means_results: Dict[str, np.ndarray],
     checkpoint_path: str,
     num_clips: int,
     num_steps: int,
@@ -555,6 +580,9 @@ def save_results(
         original_qpos: Original reference qpos.
         results: Dictionary mapping rollout name to qpos arrays.
         latents_results: Dictionary mapping rollout name to latents arrays.
+        means_results: Dictionary mapping rollout name to prior-mean arrays
+            (the mu the latent was sampled around; equals latents for policies
+            without a distinct mean).
         checkpoint_path: Path to source checkpoint.
         num_clips: Number of clips.
         num_steps: Steps per clip.
@@ -571,6 +599,8 @@ def save_results(
             f.create_dataset(f"{name}_qpos", data=data, dtype="float32")
         for name, data in latents_results.items():
             f.create_dataset(f"{name}_latents", data=data, dtype="float32")
+        for name, data in means_results.items():
+            f.create_dataset(f"{name}_means", data=data, dtype="float32")
 
         f.attrs["num_clips"] = num_clips
         f.attrs["num_steps"] = num_steps
@@ -1122,10 +1152,15 @@ def _collect_and_log(
     desc,
     results,
     latents_results,
+    means_results,
 ):
     """Collect rollouts for a single policy and store in results dicts."""
     t_start = time.time()
-    results[name], latents_results[name] = collect_rollouts(
+    (
+        results[name],
+        latents_results[name],
+        means_results[name],
+    ) = collect_rollouts(
         env,
         reference_clips,
         policy_fn,
@@ -1171,6 +1206,7 @@ def main_distill(args):
     rng = jax.random.PRNGKey(args.seed)
     results = {}
     latents_results = {}
+    means_results = {}
 
     # 1. Get original qpos
     print("\n" + "=" * 60)
@@ -1204,6 +1240,7 @@ def main_distill(args):
         desc="Teacher",
         results=results,
         latents_results=latents_results,
+        means_results=means_results,
     )
 
     # 3. Student encoder-decoder rollouts
@@ -1228,6 +1265,7 @@ def main_distill(args):
         desc="Student encoder-decoder",
         results=results,
         latents_results=latents_results,
+        means_results=means_results,
     )
 
     # 4. Prior rollouts deterministic
@@ -1254,6 +1292,7 @@ def main_distill(args):
         desc="Prior (deterministic)",
         results=results,
         latents_results=latents_results,
+        means_results=means_results,
     )
 
     # 5. Prior rollouts with predicted logvar
@@ -1280,6 +1319,7 @@ def main_distill(args):
         desc="Prior (predicted logvar)",
         results=results,
         latents_results=latents_results,
+        means_results=means_results,
     )
 
     # 6. Prior rollouts with specified fixed logvar values
@@ -1313,9 +1353,10 @@ def main_distill(args):
             desc=f"Prior (logvar={logvar})",
             results=results,
             latents_results=latents_results,
+            means_results=means_results,
         )
 
-    return original_qpos, results, latents_results
+    return original_qpos, results, latents_results, means_results
 
 
 def main_distill_prior(args):
@@ -1343,6 +1384,7 @@ def main_distill_prior(args):
     rng = jax.random.PRNGKey(args.seed)
     results = {}
     latents_results = {}
+    means_results = {}
 
     # 1. Get original qpos
     print("\n" + "=" * 60)
@@ -1373,6 +1415,7 @@ def main_distill_prior(args):
         desc="Encoder-decoder",
         results=results,
         latents_results=latents_results,
+        means_results=means_results,
     )
 
     # 3. RGM rollouts deterministic
@@ -1399,6 +1442,7 @@ def main_distill_prior(args):
         desc="RGM (deterministic)",
         results=results,
         latents_results=latents_results,
+        means_results=means_results,
     )
 
     # 4. RGM rollouts with predicted logvar
@@ -1425,6 +1469,7 @@ def main_distill_prior(args):
         desc="RGM (predicted logvar)",
         results=results,
         latents_results=latents_results,
+        means_results=means_results,
     )
 
     # 5. RGM rollouts with specified fixed logvar values
@@ -1458,9 +1503,10 @@ def main_distill_prior(args):
             desc=f"RGM (logvar={logvar})",
             results=results,
             latents_results=latents_results,
+            means_results=means_results,
         )
 
-    return original_qpos, results, latents_results
+    return original_qpos, results, latents_results, means_results
 
 
 def main():
@@ -1472,9 +1518,11 @@ def main():
     print("=" * 60)
 
     if args.checkpoint_type == "distill_prior":
-        original_qpos, results, latents_results = main_distill_prior(args)
+        original_qpos, results, latents_results, means_results = main_distill_prior(
+            args
+        )
     else:
-        original_qpos, results, latents_results = main_distill(args)
+        original_qpos, results, latents_results, means_results = main_distill(args)
 
     intention_size = original_qpos.shape[0]  # not used, just for save_results
     # Re-derive intention_size from results
@@ -1490,6 +1538,7 @@ def main():
         original_qpos,
         results,
         latents_results,
+        means_results,
         args.checkpoint_path,
         original_qpos.shape[0],
         next(iter(results.values())).shape[1],
