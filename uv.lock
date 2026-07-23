@@ -1314,7 +1314,7 @@ wheels = [
 
 [[package]]
 name = "mujoco"
-version = "3.7.0.dev897628283"
+version = "3.11.0.dev952380184"
 source = { registry = "https://py.mujoco.org/" }
 dependencies = [
     { name = "absl-py" },
@@ -1324,16 +1324,16 @@ dependencies = [
     { name = "pyopengl" },
 ]
 wheels = [
-    { url = "https://py.mujoco.org/mujoco/mujoco-3.7.0.dev897628283-cp312-cp312-macosx_11_0_universal2.whl" },
-    { url = "https://py.mujoco.org/mujoco/mujoco-3.7.0.dev897628283-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl" },
-    { url = "https://py.mujoco.org/mujoco/mujoco-3.7.0.dev897628283-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
-    { url = "https://py.mujoco.org/mujoco/mujoco-3.7.0.dev897628283-cp312-cp312-win_amd64.whl" },
+    { url = "https://py.mujoco.org/mujoco/mujoco-3.11.0.dev952380184-cp312-cp312-macosx_11_0_universal2.whl", hash = "sha256:8be3588cdcb434374423485afca53e582183e567a3575d48c5341646feb6ff48" },
+    { url = "https://py.mujoco.org/mujoco/mujoco-3.11.0.dev952380184-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:76c1015db2824e6214932c29aad4f1db5a06a33cfb4e7789363f9a4f8bc6e991" },
+    { url = "https://py.mujoco.org/mujoco/mujoco-3.11.0.dev952380184-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7bebe6b3f43bc53c282d0a854a2942951bb448f918b0dc87e71b58c08529b7d7" },
+    { url = "https://py.mujoco.org/mujoco/mujoco-3.11.0.dev952380184-cp312-cp312-win_amd64.whl", hash = "sha256:7008230e971652c2af17d92171cd95d1b5ab1375c67880db3b4b37cde14f2116" },
 ]
 
 [[package]]
 name = "mujoco-mjx"
-version = "3.4.1"
-source = { git = "https://github.com/google-deepmind/mujoco?subdirectory=mjx&rev=main#f0d5ed73b2242ea3e4ab4303daabd7771f0722bc" }
+version = "3.11.0"
+source = { git = "https://github.com/google-deepmind/mujoco?subdirectory=mjx&rev=main#fe9dc584772bf618144542682b10aa2c8d4a0120" }
 dependencies = [
     { name = "absl-py" },
     { name = "etils", extra = ["epath"] },
@@ -2809,16 +2809,16 @@ wheels = [
 
 [[package]]
 name = "warp-lang"
-version = "1.11.0"
+version = "1.14.0"
 source = { registry = "https://pypi.nvidia.com/" }
 dependencies = [
     { name = "numpy" },
 ]
 wheels = [
-    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.11.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:3a4f1c9a6e721d7de7d6dad6b242c54afaf20c6e14a767c0da03e5e963fcc13c" },
-    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.11.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:524dce20de6162ba25333552168ebf430973050e00d9f8116b8df41a60d25d6e" },
-    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.11.0-py3-none-manylinux_2_34_aarch64.whl", hash = "sha256:1ae6cfc226107f96e4d495b41a3dab32488e8ee8f074b0e1bcaf22e7fb8c904d" },
-    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.11.0-py3-none-win_amd64.whl", hash = "sha256:80d8493cbe243a3510134f3af289646d7bd7484217a30ecf565d676466ef8a5e" },
+    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.14.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:12656050545cc77bf9b9b155399496c1a6279b5b6c59e407507d6858a2beb4a2" },
+    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.14.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:70cd127d0e9109417099649fedf9d00f39f1307ccb7a6e9fb87661337868d7de" },
+    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.14.0-py3-none-manylinux_2_34_aarch64.whl", hash = "sha256:f482787e8da9c9ef045601fde99095e16d604fbcc3cbb4a1e0cef0769388b316" },
+    { url = "https://pypi.nvidia.com/warp-lang/warp_lang-1.14.0-py3-none-win_amd64.whl", hash = "sha256:936b49ec78237f9760e58cbe9c46ee6f4244aefbd62071c4fa9fd3b313dfa878" },
 ]
 
 [[package]]
