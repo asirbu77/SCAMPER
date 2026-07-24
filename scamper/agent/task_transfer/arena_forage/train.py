@@ -1,8 +1,9 @@
 """Arena forage task transfer training with Brax PPO.
 
-Four training modes:
+Five training modes:
 - mimic_mjx: Freeze decoder, train new encoder
 - res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
+- bp_res_control: Freeze behavior prior (rgm) + decoder, train residual encoder (from behavior_prior checkpoint)
 - prior_gating: Freeze motion prior + behavior prior + decoder, train residual + gate (from behavior_prior checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
@@ -11,6 +12,7 @@ Supports Orbax checkpointing and SLURM preemption recovery.
 Usage:
     python -m scamper.agent.task_transfer.arena_forage.train mode=mimic_mjx
     python -m scamper.agent.task_transfer.arena_forage.train mode=res_control
+    python -m scamper.agent.task_transfer.arena_forage.train mode=bp_res_control
     python -m scamper.agent.task_transfer.arena_forage.train mode=prior_gating
     python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 """
@@ -77,6 +79,7 @@ from scamper.agent.task_transfer.arena_forage.wrappers import (
     FlatObsWrapper,
     PriorDecoderHighLevelWrapper,
     PriorRGMDecoderHighLevelWrapper,
+    RGMDecoderHighLevelWrapper,
 )
 from scamper.agent.task_transfer.arena_forage.scratch_networks import (
     make_scratch_ppo_networks,
@@ -157,8 +160,8 @@ def main(cfg: DictConfig) -> None:
 
     # `prior_params` defaults to None; only set by modes that load a prior.
     prior_params = None
-    if cfg.mode == "prior_gating":
-        logging.info(f"Loading prior_gating checkpoint from: {prior_checkpoint_path}")
+    if cfg.mode in ("prior_gating", "bp_res_control"):
+        logging.info(f"Loading {cfg.mode} checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
             prior_params,
@@ -202,7 +205,7 @@ def main(cfg: DictConfig) -> None:
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
-    if cfg.mode == "prior_gating":
+    if cfg.mode in ("prior_gating", "bp_res_control"):
         frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
@@ -295,6 +298,20 @@ def main(cfg: DictConfig) -> None:
                 gate_margin=mode_cfg.get("gate_margin", 0.0),
                 rgm_noise=mode_cfg.rgm_noise,
                 rgm_logvar=rgm_logvar,
+            )
+        elif cfg.mode == "bp_res_control":
+            behavior_prior_fn = make_behavior_prior_inference_fn(
+                rgm_params, normalizer_params, ckpt_cfg
+            )
+            mode_cfg = cfg.bp_res_control
+            return RGMDecoderHighLevelWrapper(
+                base_env,
+                behavior_prior_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
+                rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=mode_cfg.get("rgm_logvar", None),
             )
         else:  # res_control
             prior_fn = make_prior_inference_fn(

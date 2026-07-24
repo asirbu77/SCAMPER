@@ -156,16 +156,19 @@ downstream task by running the corresponding task-transfer entry point.
 
 ### Modes (per task)
 
-| Task | `mimic_mjx` | `res_control` | `prior_gating` | `scratch` |
-|---|:---:|:---:|:---:|:---:|
-| `arena_forage`     | ✓ | ✓ | ✓ | ✓ |
-| `maintain_velocity`| ✓ | ✓ |   | ✓ |
-| `walk_rear`        | ✓ | ✓ |   | ✓ |
+| Task | `mimic_mjx` | `res_control` | `bp_res_control` | `prior_gating` | `scratch` |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `arena_forage`     | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `maintain_velocity`| ✓ | ✓ |   |   | ✓ |
+| `walk_rear`        | ✓ | ✓ |   |   | ✓ |
 
 - **`mimic_mjx`** — freeze the decoder; train a fresh task encoder over it
   (input: a mimic-mjx checkpoint).
 - **`res_control`** — freeze the motion prior + decoder; train a residual
   encoder on top (input: a distill_expert checkpoint).
+- **`bp_res_control`** — freeze the behavior prior (RGM) + decoder; train a
+  residual encoder that additively controls the RGM latent, i.e. the
+  behavior-prior analogue of `res_control` (input: a behavior_prior checkpoint).
 - **`prior_gating`** — freeze the motion prior, behavior prior, and decoder;
   train a residual encoder + a gate that switches between priors (input: a
   behavior_prior checkpoint).
@@ -188,6 +191,10 @@ python -m scamper.agent.task_transfer.maintain_velocity.train \
 
 python -m scamper.agent.task_transfer.arena_forage.train \
     mode=prior_gating \
+    checkpoint.path=/path/to/behavior_prior_checkpoint
+
+python -m scamper.agent.task_transfer.arena_forage.train \
+    mode=bp_res_control \
     checkpoint.path=/path/to/behavior_prior_checkpoint
 
 python -m scamper.agent.task_transfer.walk_rear.train mode=scratch

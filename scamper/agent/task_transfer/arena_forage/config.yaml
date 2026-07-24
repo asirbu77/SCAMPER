@@ -1,21 +1,23 @@
 # Arena Forage Task Transfer Training Config
 #
-# Four training modes:
+# Five training modes:
 #   mimic_mjx: Freeze decoder, train new encoder
 #   res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
+#   bp_res_control: Freeze behavior prior (rgm) + decoder, train residual encoder (from behavior_prior checkpoint)
 #   prior_gating: Freeze motion prior + behavior prior + decoder, train residual + gate (from behavior_prior checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
 # Usage:
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=mimic_mjx
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=res_control
+#   python -m scamper.agent.task_transfer.arena_forage.train mode=bp_res_control
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_gating
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 
 defaults:
   - _self_
 
-# Training mode: "mimic_mjx", "res_control", "prior_gating", or "scratch"
+# Training mode: "mimic_mjx", "res_control", "bp_res_control", "prior_gating", or "scratch"
 mode: "mimic_mjx"
 
 # Checkpoint to load
@@ -31,6 +33,11 @@ mimic_mjx:
 res_control:
   deterministic_prior: true
   noise_logvar: -2.0
+
+bp_res_control:
+  # Residual control of the behavior prior (rgm): latent = residual + rgm_mean.
+  rgm_noise: false  # false = deterministic (latent = residual + rgm_mean), true = sample with noise
+  rgm_logvar: -2.0  # null = use rgm's predicted logvar, float = fixed logvar (only when rgm_noise=true)
 
 prior_gating:
   gate_bias: 0.5    # Threshold for binary gate: gate = 1 if gate_logit > gate_bias

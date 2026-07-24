@@ -732,6 +732,10 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
     }
     if cfg.mode == "res_control":
         hashable["res_control"] = OmegaConf.to_container(cfg.res_control, resolve=True)
+    elif cfg.mode == "bp_res_control":
+        hashable["bp_res_control"] = OmegaConf.to_container(
+            cfg.bp_res_control, resolve=True
+        )
     elif cfg.mode == "prior_gating":
         hashable["prior_gating"] = OmegaConf.to_container(
             cfg.prior_gating, resolve=True
