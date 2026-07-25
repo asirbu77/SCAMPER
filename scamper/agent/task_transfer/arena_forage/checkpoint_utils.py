@@ -740,6 +740,10 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
         hashable["prior_gating"] = OmegaConf.to_container(
             cfg.prior_gating, resolve=True
         )
+    elif cfg.mode == "prior_interp":
+        hashable["prior_interp"] = OmegaConf.to_container(
+            cfg.prior_interp, resolve=True
+        )
     cfg_str = json.dumps(hashable, sort_keys=True, default=str)
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]
 

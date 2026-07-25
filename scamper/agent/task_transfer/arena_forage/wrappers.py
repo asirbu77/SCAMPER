@@ -3,7 +3,9 @@
 Wrapper classes for different transfer learning modes:
 - DecoderHighLevelWrapper: Policy outputs latent -> frozen decoder -> ctrl (mimic_mjx mode)
 - PriorDecoderHighLevelWrapper: Policy outputs residual -> add to motion prior mean -> decoder -> ctrl (res_control mode)
+- RGMDecoderHighLevelWrapper: Policy outputs residual -> add to behavior prior mean -> decoder -> ctrl (bp_res_control mode)
 - PriorRGMDecoderHighLevelWrapper: Policy outputs residual + gate -> select motion prior or behavior prior -> decoder -> ctrl (prior_gating mode)
+- PriorRGMInterpDecoderHighLevelWrapper: Policy outputs residual -> fixed linear blend of motion prior and behavior prior -> decoder -> ctrl (prior_interp mode)
 - FlatObsWrapper: Converts dict observations to flat arrays (scratch mode)
 
 Supports both legacy flat observations and new dict observations format.
@@ -661,3 +663,169 @@ class PriorRGMDecoderHighLevelWrapper(wrapper.Wrapper):
     def action_size(self) -> int:
         """Return latent_size + 1 (residual + scalar gate) as the action size."""
         return self._latent_size + 1
+
+
+class PriorRGMInterpDecoderHighLevelWrapper(wrapper.Wrapper):
+    """Mode: Fixed linear interpolation between motion prior and behavior prior.
+
+    Like PriorRGMDecoderHighLevelWrapper but the blend weight is a constant
+    hyperparameter instead of a learned binary gate. Every step mixes both
+    priors:
+
+    latent = alpha * (prior_mean + residual) + (1 - alpha) * rgm_z
+
+    The policy outputs only the residual, so the action size is latent_size
+    (no gate head, no hysteresis, no carried gate state).
+
+    At alpha=1 this reduces to res_control (prior_mean + residual); as alpha
+    approaches 0 it reduces to deterministic bp_res_control with an inert
+    residual. Note that the residual's effective authority is scaled by alpha.
+    """
+
+    def __init__(
+        self,
+        env: mjx_env.MjxEnv,
+        prior_inference_fn: Callable,
+        rgm_inference_fn: Callable,
+        decoder_inference_fn: Callable,
+        latent_size: int,
+        proprio_size: int,
+        alpha: float = 0.5,
+        rgm_noise: bool = False,
+        rgm_logvar: float | None = None,
+    ):
+        """Initialize the interpolated prior+rgm+decoder wrapper.
+
+        Args:
+            env: Base environment with dict observations.
+            prior_inference_fn: Function (proprio) -> (mean, logvar)
+            rgm_inference_fn: Function (proprio) -> (mean, logvar)
+            decoder_inference_fn: Function (latent_proprio) -> (action, extras)
+            latent_size: Dimension of the latent intention space.
+            proprio_size: Size of proprioceptive observations.
+            alpha: Fixed blend weight in (0, 1]. 1.0 uses the motion prior plus
+                residual only; smaller values weight the behavior prior more.
+                0.0 is rejected because it makes the residual inert (no
+                gradient reaches the policy).
+            rgm_noise: If True, sample RGM latent with noise. If False,
+                use rgm_mean only (deterministic).
+            rgm_logvar: Fixed log-variance for RGM sampling. Only used when
+                rgm_noise=True. If None, uses the RGM's predicted logvar.
+                If a float, overrides the predicted logvar with this value.
+
+        Raises:
+            ValueError: If alpha is outside (0, 1].
+        """
+        if not 0.0 < alpha <= 1.0:
+            raise ValueError(
+                f"prior_interp alpha must be in (0, 1], got {alpha}. "
+                "alpha=0 makes the residual inert (the policy receives no "
+                "gradient); use mode=bp_res_control instead."
+            )
+        self._prior_fn = prior_inference_fn
+        self._rgm_fn = rgm_inference_fn
+        self._decoder_fn = decoder_inference_fn
+        self._latent_size = latent_size
+        self._proprio_size = proprio_size
+        self._alpha = alpha
+        self._rgm_noise = rgm_noise
+        self._rgm_logvar = rgm_logvar
+        super().__init__(env)
+
+    def reset(
+        self,
+        rng: jax.Array,
+        **kwargs: Any,
+    ) -> mjx_env.State:
+        """Reset the environment.
+
+        Args:
+            rng: Random key for environment reset.
+            **kwargs: Additional arguments passed to base env reset.
+
+        Returns:
+            Initial environment state with prior/rgm/decoder extras initialized.
+        """
+        state = self.env.reset(rng, **kwargs)
+
+        proprio = _get_proprio(state.obs, self._proprio_size)
+
+        prior_mean, prior_logvar = self._prior_fn(proprio)
+        state.info["prior_mean"] = prior_mean
+        state.info["prior_logvar"] = prior_logvar
+
+        rgm_mean, rgm_logvar = self._rgm_fn(proprio)
+        state.info["rgm_mean"] = rgm_mean
+        state.info["rgm_logvar"] = rgm_logvar
+
+        dummy_latent = jp.zeros_like(prior_mean)
+        latent_proprio = jp.concatenate([dummy_latent, proprio], axis=-1)
+        _, decoder_extras = self._decoder_fn(latent_proprio)
+        state.info["decoder_extras"] = decoder_extras
+
+        state.info["final_latent"] = jp.zeros_like(prior_mean)
+        state.info["rng"] = rng
+
+        state = state.replace(obs=_flatten_obs_for_policy(state.obs))
+
+        return state
+
+    def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
+        """Take a step using a fixed blend of both priors as the latent.
+
+        Args:
+            state: Current environment state.
+            action: Residual vector from the policy.
+
+        Returns:
+            Next environment state after applying decoded control.
+        """
+        proprio = _get_proprio(state.obs, self._proprio_size)
+
+        residual = action
+
+        prior_mean, prior_logvar = self._prior_fn(proprio)
+        rgm_mean, rgm_logvar = self._rgm_fn(proprio)
+
+        rng = state.info.get("rng", jax.random.PRNGKey(0))
+        rng, noise_rng = jax.random.split(rng)
+        if self._rgm_noise:
+            if self._rgm_logvar is not None:
+                rgm_std = jp.exp(0.5 * self._rgm_logvar)
+            else:
+                rgm_std = jp.exp(0.5 * rgm_logvar)
+            rgm_z = (
+                rgm_mean + jax.random.normal(noise_rng, shape=rgm_mean.shape) * rgm_std
+            )
+        else:
+            rgm_z = rgm_mean
+
+        # Prior + residual
+        prior_residual = prior_mean + residual
+
+        # Fixed linear interpolation between the two priors
+        latent = self._alpha * prior_residual + (1.0 - self._alpha) * rgm_z
+
+        state.info["rng"] = rng
+
+        latent_proprio = jp.concatenate([latent, proprio], axis=-1)
+
+        ctrl, decoder_extras = self._decoder_fn(latent_proprio)
+
+        state.info["decoder_extras"] = decoder_extras
+        state.info["prior_mean"] = prior_mean
+        state.info["prior_logvar"] = prior_logvar
+        state.info["rgm_mean"] = rgm_mean
+        state.info["rgm_logvar"] = rgm_logvar
+        state.info["final_latent"] = latent
+
+        next_state = super().step(state, ctrl)
+
+        next_state = next_state.replace(obs=_flatten_obs_for_policy(next_state.obs))
+
+        return next_state
+
+    @property
+    def action_size(self) -> int:
+        """Return the latent size as the action size (residual only)."""
+        return self._latent_size

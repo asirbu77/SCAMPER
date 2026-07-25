@@ -156,11 +156,11 @@ downstream task by running the corresponding task-transfer entry point.
 
 ### Modes (per task)
 
-| Task | `mimic_mjx` | `res_control` | `bp_res_control` | `prior_gating` | `scratch` |
-|---|:---:|:---:|:---:|:---:|:---:|
-| `arena_forage`     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `maintain_velocity`| ✓ | ✓ |   |   | ✓ |
-| `walk_rear`        | ✓ | ✓ |   |   | ✓ |
+| Task | `mimic_mjx` | `res_control` | `bp_res_control` | `prior_gating` | `prior_interp` | `scratch` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `arena_forage`     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `maintain_velocity`| ✓ | ✓ |   |   |   | ✓ |
+| `walk_rear`        | ✓ | ✓ |   |   |   | ✓ |
 
 - **`mimic_mjx`** — freeze the decoder; train a fresh task encoder over it
   (input: a mimic-mjx checkpoint).
@@ -171,6 +171,12 @@ downstream task by running the corresponding task-transfer entry point.
   behavior-prior analogue of `res_control` (input: a behavior_prior checkpoint).
 - **`prior_gating`** — freeze the motion prior, behavior prior, and decoder;
   train a residual encoder + a gate that switches between priors (input: a
+  behavior_prior checkpoint).
+- **`prior_interp`** — freeze the motion prior, behavior prior, and decoder;
+  train a residual encoder whose latent is a *fixed* linear blend of both
+  priors, `latent = alpha * (prior_mean + residual) + (1 - alpha) * rgm_z`.
+  Unlike `prior_gating` the blend weight `alpha` is a constant hyperparameter
+  (default 0.5), not learned, so the policy outputs only the residual (input: a
   behavior_prior checkpoint).
 - **`scratch`** — train policy and decoder from random initialization; no
   upstream checkpoint needed beyond config-shape inference.
@@ -195,6 +201,11 @@ python -m scamper.agent.task_transfer.arena_forage.train \
 
 python -m scamper.agent.task_transfer.arena_forage.train \
     mode=bp_res_control \
+    checkpoint.path=/path/to/behavior_prior_checkpoint
+
+python -m scamper.agent.task_transfer.arena_forage.train \
+    mode=prior_interp \
+    prior_interp.alpha=0.5 \
     checkpoint.path=/path/to/behavior_prior_checkpoint
 
 python -m scamper.agent.task_transfer.walk_rear.train mode=scratch

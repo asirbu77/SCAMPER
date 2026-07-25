@@ -1,10 +1,11 @@
 # Arena Forage Task Transfer Training Config
 #
-# Five training modes:
+# Six training modes:
 #   mimic_mjx: Freeze decoder, train new encoder
 #   res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
 #   bp_res_control: Freeze behavior prior (rgm) + decoder, train residual encoder (from behavior_prior checkpoint)
 #   prior_gating: Freeze motion prior + behavior prior + decoder, train residual + gate (from behavior_prior checkpoint)
+#   prior_interp: Freeze motion prior + behavior prior + decoder, train residual with a fixed linear blend of both priors (from behavior_prior checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
 # Usage:
@@ -12,12 +13,14 @@
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=res_control
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=bp_res_control
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_gating
+#   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_interp
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 
 defaults:
   - _self_
 
-# Training mode: "mimic_mjx", "res_control", "bp_res_control", "prior_gating", or "scratch"
+# Training mode: "mimic_mjx", "res_control", "bp_res_control", "prior_gating",
+# "prior_interp", or "scratch"
 mode: "mimic_mjx"
 
 # Checkpoint to load
@@ -44,6 +47,17 @@ prior_gating:
   gate_margin: 0.2  # Hysteresis margin for bistable switching (0.0 = no hysteresis)
   rgm_noise: true   # false = use rgm_mean only, true = sample with noise
   rgm_logvar: -2.25 # null = use predicted logvar, float = fixed logvar (only when rgm_noise=true)
+
+prior_interp:
+  # Fixed linear blend of both priors:
+  #   latent = alpha * (prior_mean + residual) + (1 - alpha) * rgm_z
+  # The policy outputs only the residual (action size = latent_size).
+  alpha: 0.5        # Blend weight in (0, 1]. 1.0 = motion prior + residual only;
+                    # smaller values weight the behavior prior more. Note the
+                    # residual's effective authority is scaled by alpha. 0.0 is
+                    # rejected (residual becomes inert) -- use bp_res_control.
+  rgm_noise: false  # false = deterministic (rgm_z = rgm_mean), true = sample with noise
+  rgm_logvar: -2.0  # null = use predicted logvar, float = fixed logvar (only when rgm_noise=true)
 
 scratch:
   # Actuator type: true = torque (matches imitation training), false = PD actuators

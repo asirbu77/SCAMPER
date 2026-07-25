@@ -1,10 +1,11 @@
 """Arena forage task transfer training with Brax PPO.
 
-Five training modes:
+Six training modes:
 - mimic_mjx: Freeze decoder, train new encoder
 - res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
 - bp_res_control: Freeze behavior prior (rgm) + decoder, train residual encoder (from behavior_prior checkpoint)
 - prior_gating: Freeze motion prior + behavior prior + decoder, train residual + gate (from behavior_prior checkpoint)
+- prior_interp: Freeze motion prior + behavior prior + decoder, train residual with a fixed linear blend of both priors (from behavior_prior checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
@@ -14,6 +15,7 @@ Usage:
     python -m scamper.agent.task_transfer.arena_forage.train mode=res_control
     python -m scamper.agent.task_transfer.arena_forage.train mode=bp_res_control
     python -m scamper.agent.task_transfer.arena_forage.train mode=prior_gating
+    python -m scamper.agent.task_transfer.arena_forage.train mode=prior_interp
     python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 """
 
@@ -79,6 +81,7 @@ from scamper.agent.task_transfer.arena_forage.wrappers import (
     FlatObsWrapper,
     PriorDecoderHighLevelWrapper,
     PriorRGMDecoderHighLevelWrapper,
+    PriorRGMInterpDecoderHighLevelWrapper,
     RGMDecoderHighLevelWrapper,
 )
 from scamper.agent.task_transfer.arena_forage.scratch_networks import (
@@ -160,7 +163,7 @@ def main(cfg: DictConfig) -> None:
 
     # `prior_params` defaults to None; only set by modes that load a prior.
     prior_params = None
-    if cfg.mode in ("prior_gating", "bp_res_control"):
+    if cfg.mode in ("prior_gating", "prior_interp", "bp_res_control"):
         logging.info(f"Loading {cfg.mode} checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
@@ -205,7 +208,7 @@ def main(cfg: DictConfig) -> None:
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
-    if cfg.mode in ("prior_gating", "bp_res_control"):
+    if cfg.mode in ("prior_gating", "prior_interp", "bp_res_control"):
         frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
@@ -299,6 +302,25 @@ def main(cfg: DictConfig) -> None:
                 rgm_noise=mode_cfg.rgm_noise,
                 rgm_logvar=rgm_logvar,
             )
+        elif cfg.mode == "prior_interp":
+            prior_fn = make_prior_inference_fn(
+                prior_params, normalizer_params, ckpt_cfg
+            )
+            behavior_prior_fn = make_behavior_prior_inference_fn(
+                rgm_params, normalizer_params, ckpt_cfg
+            )
+            mode_cfg = cfg.prior_interp
+            return PriorRGMInterpDecoderHighLevelWrapper(
+                base_env,
+                prior_fn,
+                behavior_prior_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
+                alpha=mode_cfg.alpha,
+                rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=mode_cfg.get("rgm_logvar", None),
+            )
         elif cfg.mode == "bp_res_control":
             behavior_prior_fn = make_behavior_prior_inference_fn(
                 rgm_params, normalizer_params, ckpt_cfg
@@ -313,7 +335,7 @@ def main(cfg: DictConfig) -> None:
                 rgm_noise=mode_cfg.rgm_noise,
                 rgm_logvar=mode_cfg.get("rgm_logvar", None),
             )
-        else:  # res_control
+        elif cfg.mode == "res_control":
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
@@ -326,6 +348,11 @@ def main(cfg: DictConfig) -> None:
                 proprio_size,
                 deterministic_prior=mode_cfg.deterministic_prior,
                 noise_logvar=mode_cfg.noise_logvar,
+            )
+        else:
+            raise ValueError(
+                f"Unknown mode: {cfg.mode!r}. Expected one of: mimic_mjx, "
+                "res_control, bp_res_control, prior_gating, prior_interp, scratch."
             )
 
     env = make_wrapped_env(is_eval=False)
