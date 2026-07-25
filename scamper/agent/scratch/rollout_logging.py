@@ -86,7 +86,7 @@ def scratch_rollout_logging_fn(
         rollout.append(state)
 
     _log_latent_stats("encoder", latent_means, latent_logvars)
-    _log_latent_stats("motion_prior", motion_prior_means, motion_prior_logvars)
+    _log_latent_stats("prior", motion_prior_means, motion_prior_logvars)
 
     _render_student_video(env, cfg, model_path, current_step, rollout)
 
