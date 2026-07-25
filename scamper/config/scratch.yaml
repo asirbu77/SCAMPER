@@ -1,0 +1,215 @@
+# =============================================================================
+# Rodent From-Scratch Three-Network Configuration (PPO, no teacher)
+# =============================================================================
+# Trains the same VAE student as distill-expert (encoder + decoder + motion
+# prior) but with PPO on the imitation reward instead of DAgger against an
+# expert teacher. The latent KL targets the motion prior and uses the same
+# weights and schedule as `distill-expert.yaml`.
+#
+# Produces a `DistillNetwork` checkpoint, so the result drops into
+# train_behavior_prior and task_transfer `res_control` like a distill run.
+# =============================================================================
+
+# =============================================================================
+# Environment Configuration
+# =============================================================================
+env_config:
+  env_name: "RodentImitation"
+  mujoco_impl: "jax"
+
+  # Physics Solver
+  solver: "newton"
+  iterations: 5
+  ls_iterations: 5
+  naconmax: 256
+  njmax: 128
+  noslip_iterations: 0
+
+  # Timing
+  sim_dt: 0.002
+  ctrl_dt: 0.01
+  mocap_hz: 50
+
+  # Reference Clips
+  clip_length: 250
+  clip_set: "all"
+  reference_length: 5
+  start_frame_range: [0, 50]
+  qvel_init: "zeros"
+  keep_clips_idx: null
+
+  # Domain Randomization
+  domain_randomization:
+    use_domain_randomization: true
+    floor_friction: [0.4, 1.0]
+    static_friction_scale: [0.9, 1.1]
+    armature_scale: [1.0, 1.05]
+    com_jitter: [-0.05, 0.05]
+    link_mass_scale: [0.9, 1.1]
+    torso_mass_jitter: [-0.02, 0.02]
+    qpos0_jitter: [-0.05, 0.05]
+
+  # Reward Terms
+  reward_terms:
+    root_pos:
+      exp_scale: 0.035
+      weight: 1.0
+    root_quat:
+      exp_scale: 20.0
+      weight: 1.0
+    joints:
+      exp_scale: 1.41
+      weight: 1.0
+    joints_vel:
+      exp_scale: 1.0
+      weight: 0.0
+    bodies_pos:
+      exp_scale: 0.25
+      weight: 0.0
+    end_eff:
+      exp_scale: 0.03
+      weight: 1.0
+    torso_z_range:
+      healthy_z_range: [0.0325, 0.5]
+      weight: 1.0
+    control_cost:
+      weight: 0.02
+    control_diff_cost:
+      weight: 0.02
+    energy_cost:
+      max_value: 50.0
+      weight: 0.01
+
+  # Termination Criteria
+  termination_criteria:
+    root_too_far:
+      max_distance: 0.1
+    root_too_rotated:
+      max_degrees: 60.0
+    pose_error:
+      max_l2_error: 4.5
+    nan_termination: {}
+
+# =============================================================================
+# Rendering Configuration
+# =============================================================================
+render_config:
+  render_camera_name: close_profile
+  render_fps: 50
+  render_interval: 1
+
+# =============================================================================
+# Multi-Mode Motion-Prior Rollout Evaluation
+# =============================================================================
+# YAML key kept as `prior_rollout_config` to match distill-expert.yaml;
+# configures motion-prior rollout evaluation.
+prior_rollout_config:
+  enabled: true
+  eval_interval: 1
+  max_steps: 400
+
+# =============================================================================
+# Network Architecture
+# =============================================================================
+network_config:
+  # Discriminates scratch checkpoints from distill ones; both share the
+  # `DistillNetwork` step prefix and policy-tree layout.
+  arch_name: scratch
+  latent_size: 16
+  encoder_layer_sizes: [2048, 1024, 1024]
+  decoder_layer_sizes: [1024, 1024, 512]
+  # YAML key kept as `prior_layer_sizes` for compat with downstream
+  # task_transfer config reads; sizes the motion prior.
+  prior_layer_sizes: [1536, 1024, 512]
+  critic_layer_sizes: [2048, 1024, 1024, 1024, 1024, 512]
+  # Multiplicative Gaussian noise std on decoder proprioception (0 = disabled).
+  # Kept off by default for architectural parity with distill-expert.
+  proprioception_noise_std: 0.0
+
+# =============================================================================
+# Latent Loss Configuration
+# =============================================================================
+# Same terms, weights and schedule as `distill_config` in distill-expert.yaml.
+latent_config:
+  kl_weight: 1.0
+  ar1_weight: 0.005
+
+  # Logvar clamping (matches PULSE defaults)
+  clamp_logvar: true
+  logvar_min: -5.0
+  logvar_max: 0.0
+
+  # KL schedule (ramp down from kl_start_weight to kl_end_weight).
+  # When enabled, `kl_weight` above is ignored.
+  use_kl_schedule: true
+  kl_schedule_params:
+    kl_start_weight: 1e-3
+    kl_end_weight: 1e-4
+    kl_start_ramp: 0.0
+    kl_end_ramp: 0.25
+
+  # AR(1) schedule. Disabled by default, so `ar1_weight` is used as-is.
+  use_ar1_schedule: false
+  ar1_schedule_params:
+    ar1_start_weight: 0.01
+    ar1_end_weight: 0.1
+    ar1_start_ramp: 0.0
+    ar1_end_ramp: 0.25
+
+# =============================================================================
+# Training Setup
+# =============================================================================
+train_setup:
+  # Checkpointing and restoration
+  checkpoint_to_restore: null         # Path to restore model weights
+  restore_from_run_state: null        # Path to restore full training state
+
+  # Data splitting
+  train_subset_ratio: 0.8             # Fraction of clips for training
+
+  # Evaluation and resets
+  eval_every: 25_000_000              # Eval frequency (env steps)
+  reset_every: 25_000_000             # JIT recompilation frequency (memory mgmt)
+
+  # ---------------------------------------------------------------------------
+  # PPO Training Hyperparameters
+  # ---------------------------------------------------------------------------
+  # Every key here is splatted into scamper.agent.scratch.ppo.train.
+  train_config:
+    num_envs: 4096                    # Parallel environments
+    num_timesteps: 3_000_000_000      # Total training steps
+    batch_size: 1024                  # Samples per gradient update
+    num_minibatches: 16               # Minibatches per epoch
+    num_updates_per_batch: 4          # Epochs per PPO update
+    learning_rate: 1e-4               # Adam learning rate
+    grad_clip_threshold: 20.0         # Max gradient norm for clipping
+    clipping_epsilon: 0.2             # PPO clip range
+    discounting: 0.95                 # Discount factor (gamma)
+    action_repeat: 1                  # Actions repeated per step
+    entropy_cost: 1e-2                # Entropy bonus coefficient
+    vf_loss_coefficient: 0.25         # Value function loss coefficient
+    reward_scaling: 1                 # Reward multiplier
+    normalize_observations: true      # Running mean/std normalization
+    unroll_length: 20                 # Rollout length before update
+    seed: 0                           # Random seed
+    get_activation: false             # Store network activations (debugging)
+    deterministic_eval: true          # Use mean action during eval
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+logging_config:
+  project_name: SCAMPER
+  group_name: scratch
+  exp_name:
+  clip_id: -1                         # Clip ID for single-clip runs (-1 = all)
+  model_path: model_checkpoints/
+
+# =============================================================================
+# Walker Configuration
+# =============================================================================
+walker_config:
+  walker_name: "rodent"
+  xml_variant: "limited-collisions"   # 'full-collisions', 'limited-collisions', or 'no-tail-collisions'
+  torque_actuators: true              # Use torque (vs position) control
+  rescale_factor: 0.9                 # Model scale factor

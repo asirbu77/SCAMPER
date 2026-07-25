@@ -80,6 +80,22 @@ def load_frozen_distill_networks(
     # cfg attribute `prior_layer_sizes` kept for compat; sizes the motion prior.
     motion_prior_hidden = tuple(cfg.network_config.prior_layer_sizes)
 
+    if cfg.network_config.get("arch_name", "distill") == "scratch":
+        # train_scratch writes the same policy/config layout but its train_state
+        # is a PPO TrainingState (policy + value), so it needs its own abstract
+        # tree to restore into.
+        return _load_frozen_scratch_networks(
+            checkpoint_path=checkpoint_path,
+            step=step,
+            cfg=cfg,
+            obs_sizes=obs_sizes,
+            action_size=action_size,
+            latent_size=latent_size,
+            encoder_hidden=encoder_hidden,
+            decoder_hidden=decoder_hidden,
+            motion_prior_hidden=motion_prior_hidden,
+        )
+
     # Create abstract structures to match the checkpoint pytree.
     encoder, decoder, motion_prior, _ = make_distill_networks(
         obs_sizes=obs_sizes,
@@ -128,6 +144,90 @@ def load_frozen_distill_networks(
         train_state.params.encoder,
         train_state.params.decoder,
         train_state.params.prior,
+        train_state.normalizer_params,
+        OmegaConf.to_container(cfg),
+    )
+
+
+def _load_frozen_scratch_networks(
+    checkpoint_path: str,
+    step: int | None,
+    cfg,
+    obs_sizes: Dict[str, int],
+    action_size: int,
+    latent_size: int,
+    encoder_hidden: Tuple[int, ...],
+    decoder_hidden: Tuple[int, ...],
+    motion_prior_hidden: Tuple[int, ...],
+) -> Tuple[Dict, Dict, Dict, DictRunningStatisticsState, Dict]:
+    """``load_frozen_distill_networks`` for a ``train_scratch`` checkpoint.
+
+    Same checkpoint layout and step prefix as distillation, but the saved
+    ``train_state`` is a PPO ``TrainingState`` whose ``params.policy`` holds all
+    three networks under one Flax tree, alongside a value network.
+
+    Returns:
+        Tuple of (encoder_params, decoder_params, motion_prior_params,
+        normalizer_params, config_dict), with the ``*_params`` dicts in Flax
+        init format (``{"params": {...}}``).
+    """
+    # Imported lazily so behavior-prior training does not depend on the scratch
+    # trainer unless a scratch checkpoint is actually being loaded.
+    from scamper.agent.scratch import losses as scratch_losses
+    from scamper.agent.scratch import ppo as scratch_ppo
+    from scamper.agent.scratch import scratch_networks
+
+    ppo_network = scratch_networks.make_scratch_ppo_networks(
+        obs_sizes=obs_sizes,
+        action_size=action_size,
+        latent_size=latent_size,
+        encoder_hidden_layer_sizes=encoder_hidden,
+        decoder_hidden_layer_sizes=decoder_hidden,
+        motion_prior_hidden_layer_sizes=motion_prior_hidden,
+        value_hidden_layer_sizes=tuple(cfg.network_config.critic_layer_sizes),
+    )
+
+    key_policy, key_value = jax.random.split(jax.random.PRNGKey(0))
+    init_params = scratch_losses.PPONetworkParams(
+        policy=ppo_network.policy_network.init(key_policy),
+        value=ppo_network.value_network.init(key_value),
+    )
+
+    # Only the pytree structure matters here, not the hyperparameter values.
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(20.0),
+        optax.adamw(learning_rate=1e-4, weight_decay=0.0, eps=1e-5),
+    )
+
+    normalizer_state = DictRunningStatisticsState(
+        imitation_target=running_statistics.init_state(
+            specs.Array(obs_sizes["imitation_target"], jnp.dtype("float32"))
+        ),
+        proprioception=running_statistics.init_state(
+            specs.Array(obs_sizes["proprioception"], jnp.dtype("float32"))
+        ),
+    )
+
+    abstract_state = scratch_ppo.TrainingState(
+        optimizer_state=optimizer.init(init_params),
+        params=init_params,
+        normalizer_params=normalizer_state,
+        env_steps=jnp.int32(0),
+    )
+
+    train_state = checkpointing.load_training_state(
+        checkpoint_path,
+        abstract_state,
+        step_prefix="DistillNetwork",
+        step=step,
+    )
+
+    policy_params = train_state.params.policy["params"]
+
+    return (
+        {"params": policy_params["encoder"]},
+        {"params": policy_params["decoder"]},
+        {"params": policy_params["prior"]},
         train_state.normalizer_params,
         OmegaConf.to_container(cfg),
     )

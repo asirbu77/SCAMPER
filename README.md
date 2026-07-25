@@ -87,11 +87,13 @@ scamper/
 ├── train_distill_expert.py      # Stage 2 (main): DAgger into VAE student
 ├── train_behavior_prior.py      # Stage 3: behavior-prior on top of distill checkpoint
 ├── train_mimic_mjx.py           # Alternate stage 2: end-to-end VAE PPO
+├── train_scratch.py             # Alternate stage 2: encoder+decoder+motion prior via PPO
 ├── config/                      # Hydra configs (one per train script)
 ├── agent/
 │   ├── expert/                  # Expert MLP networks + PPO
 │   ├── imitation/               # VAE intention networks + PPO + losses
 │   ├── distill_expert/          # DAgger distillation pieces
+│   ├── scratch/                 # From-scratch PPO over the 3-network system
 │   ├── behavior_prior/          # Behavior-prior networks + losses
 │   └── task_transfer/           # arena_forage / maintain_velocity / walk_rear
 ├── environment/                 # Rodent envs + reference-clip loader
@@ -137,6 +139,22 @@ python -m scamper.train_behavior_prior \
 
 Trains a behavior prior on top of the frozen distill_expert encoder / decoder /
 motion prior, using a KL loss. Saves under `step_prefix="DistillPriorNetwork"`.
+
+### Alternate stage 2: From scratch (PPO, no teacher)
+
+```bash
+python -m scamper.train_scratch
+```
+
+Trains the same three networks as stage 2 — encoder + decoder + motion prior,
+with the same `KL(encoder ‖ motion prior)` and AR(1) latent losses, weights and
+schedule — but with PPO on the imitation reward instead of DAgger against an
+expert teacher. No upstream checkpoint is required.
+
+It saves under `step_prefix="DistillNetwork"` with the same policy-tree layout
+as `train_distill_expert`, so the result is a drop-in input for
+`train_behavior_prior` and task transfer's `res_control` mode. Scratch
+checkpoints are tagged with `network_config.arch_name: scratch`.
 
 All entry points are Hydra apps; pass arbitrary config overrides on the
 command line (e.g., `train_setup.train_config.num_envs=4096`,
