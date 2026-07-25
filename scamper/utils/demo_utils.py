@@ -58,6 +58,7 @@ from scamper.agent.task_transfer.arena_forage.wrappers import (
     PriorDecoderHighLevelWrapper as AFMotionPriorDecoderWrapper,
     PriorRGMDecoderHighLevelWrapper as AFMotionPriorBehaviorPriorDecoderWrapper,
     PriorRGMInterpDecoderHighLevelWrapper as AFMotionPriorBehaviorPriorInterpDecoderWrapper,
+    PriorScheduleDecoderHighLevelWrapper as AFMotionPriorBehaviorPriorScheduleDecoderWrapper,
 )
 from scamper.agent.task_transfer.maintain_velocity.checkpoint_utils import (
     load_task_transfer_brax_params as mv_load_task_transfer_brax_params,
@@ -910,7 +911,7 @@ def render_walkrear_qpos(
 
 # ---- arena-forage ----
 
-_AF_RGM_MODES = ("prior_gating", "prior_interp")
+_AF_RGM_MODES = ("prior_gating", "prior_interp", "prior_schedule")
 
 
 def _af_load_frozen_networks(checkpoint_path, step, ckpt_cfg, mode):
@@ -1058,6 +1059,34 @@ def setup_arena_forage(checkpoint_path, step):
             proprio_size,
             gate_bias=mc["gate_bias"],
             gate_margin=mc.get("gate_margin", 0.0),
+            rgm_noise=mc["rgm_noise"],
+            rgm_logvar=mc.get("rgm_logvar", None),
+        )
+    elif mode == "prior_schedule":
+        motion_prior_fn = af_make_motion_prior_inference_fn(
+            motion_prior_p, normalizer_p, ckpt_cfg
+        )
+        behavior_prior_fn = af_make_behavior_prior_inference_fn(
+            behavior_prior_p, normalizer_p, ckpt_cfg
+        )
+        mc = config.get("prior_schedule", {})
+        # Rendering a trained checkpoint means the deployment regime: freeze the
+        # schedule (progress_per_step=0) at the end of the ramp.
+        env = AFMotionPriorBehaviorPriorScheduleDecoderWrapper(
+            base_env,
+            motion_prior_fn,
+            behavior_prior_fn,
+            decoder_fn,
+            latent_size,
+            proprio_size,
+            progress_per_step=0.0,
+            initial_progress=1.0,
+            p_start=mc["p_start"],
+            p_end=mc["p_end"],
+            warmup_frac=mc["warmup_frac"],
+            ramp_frac=mc["ramp_frac"],
+            ramp_shape=mc.get("ramp_shape", "cosine"),
+            bout_tau=mc["bout_tau"],
             rgm_noise=mc["rgm_noise"],
             rgm_logvar=mc.get("rgm_logvar", None),
         )

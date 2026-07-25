@@ -744,6 +744,10 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
         hashable["prior_interp"] = OmegaConf.to_container(
             cfg.prior_interp, resolve=True
         )
+    elif cfg.mode == "prior_schedule":
+        hashable["prior_schedule"] = OmegaConf.to_container(
+            cfg.prior_schedule, resolve=True
+        )
     cfg_str = json.dumps(hashable, sort_keys=True, default=str)
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]
 

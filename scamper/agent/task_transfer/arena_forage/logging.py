@@ -34,6 +34,7 @@ def rollout_logging_fn(
     render_every: int = 1,
     eval_count: int = 0,
     scent_grid_resolution: int = 60,
+    post_reset_fn: Callable | None = None,
 ) -> None:
     """Log evaluation rollout video and metrics to wandb.
 
@@ -56,6 +57,11 @@ def rollout_logging_fn(
         render_width: Width in pixels for the output video.
         render_every: Render video every N evaluation steps.
         eval_count: Current evaluation count (0-indexed).
+        scent_grid_resolution: Grid cells per axis for the scent heatmap video.
+        post_reset_fn: Optional (state) -> state hook applied to the reset
+            state before the rollout. Used by curriculum modes to stamp the
+            current training progress onto the frozen eval env. Must preserve
+            the state's pytree structure so `jit_step` stays cached.
 
     Metrics are logged with commit=False so the caller can batch them.
     """
@@ -63,6 +69,8 @@ def rollout_logging_fn(
     reset_rng, act_rng = jax.random.split(rng)
 
     state = jit_reset(reset_rng)
+    if post_reset_fn is not None:
+        state = post_reset_fn(state)
     rollout = [state]
 
     for _ in range(episode_length):

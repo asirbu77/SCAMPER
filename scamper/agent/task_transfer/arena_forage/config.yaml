@@ -1,11 +1,12 @@
 # Arena Forage Task Transfer Training Config
 #
-# Six training modes:
+# Seven training modes:
 #   mimic_mjx: Freeze decoder, train new encoder
 #   res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
 #   bp_res_control: Freeze behavior prior (rgm) + decoder, train residual encoder (from behavior_prior checkpoint)
 #   prior_gating: Freeze motion prior + behavior prior + decoder, train residual + gate (from behavior_prior checkpoint)
 #   prior_interp: Freeze motion prior + behavior prior + decoder, train residual with a fixed linear blend of both priors (from behavior_prior checkpoint)
+#   prior_schedule: Like prior_gating, but the gate follows a fixed exploration schedule instead of being a policy output (from behavior_prior checkpoint)
 #   scratch: Train both policy and decoder from random initialization
 #
 # Usage:
@@ -14,13 +15,14 @@
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=bp_res_control
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_gating
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_interp
+#   python -m scamper.agent.task_transfer.arena_forage.train mode=prior_schedule
 #   python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 
 defaults:
   - _self_
 
 # Training mode: "mimic_mjx", "res_control", "bp_res_control", "prior_gating",
-# "prior_interp", or "scratch"
+# "prior_interp", "prior_schedule", or "scratch"
 mode: "mimic_mjx"
 
 # Checkpoint to load
@@ -58,6 +60,36 @@ prior_interp:
                     # rejected (residual becomes inert) -- use bp_res_control.
   rgm_noise: false  # false = deterministic (rgm_z = rgm_mean), true = sample with noise
   rgm_logvar: -2.0  # null = use predicted logvar, float = fixed logvar (only when rgm_noise=true)
+
+prior_schedule:
+  # Same latent construction as prior_gating (binary, never a blend):
+  #   latent = gate * (prior_mean + residual) + (1 - gate) * rgm_z
+  # but the gate is drawn from a fixed schedule rather than emitted by the
+  # policy, so the action size is latent_size (no gate head). Checkpoints are
+  # NOT interchangeable with prior_gating.
+  #
+  # The gate is a two-state Markov chain with stationary P(gate=1) = p(t) and
+  # switching timescale bout_tau, so the agent runs in bouts rather than
+  # chattering at control rate.
+  p_start: 0.0      # Gate probability at the start of the ramp. 0.0 = pure
+                    # behavior prior sampling. Consider a small floor (~0.05)
+                    # to keep the residual head receiving real gradient during
+                    # a long warmup -- with no signal the entropy bonus
+                    # inflates its scale unopposed, making the handoff abrupt.
+  p_end: 1.0        # Gate probability at the end of the ramp. 1.0 = fully
+                    # residual control of the motion prior (== res_control).
+  warmup_frac: 0.1  # Fraction of num_timesteps held at p_start before ramping
+  ramp_frac: 0.6    # Fraction of num_timesteps spent ramping p_start -> p_end;
+                    # progress past warmup_frac + ramp_frac holds at p_end
+  ramp_shape: "cosine"  # 'linear' or 'cosine' interpolation across the ramp
+  bout_tau: 25.0    # Switching timescale in env steps (larger = longer bouts)
+  rgm_noise: true   # false = use rgm_mean only, true = sample with noise
+  rgm_logvar: -2.25 # null = use predicted logvar, float = fixed logvar (only when rgm_noise=true)
+  eval_progress: 1.0  # Schedule progress used by Brax's internal evaluator. It
+                      # resets eval_env itself, so it cannot follow the
+                      # schedule; pinning at 1.0 makes eval/episode_reward a
+                      # clean learning curve for the deployment regime. The
+                      # rollout videos/gate curves mirror the real schedule.
 
 scratch:
   # Actuator type: true = torque (matches imitation training), false = PD actuators
