@@ -191,11 +191,13 @@ downstream task by running the corresponding task-transfer entry point.
   train a residual encoder + a gate that switches between priors (input: a
   behavior_prior checkpoint).
 - **`prior_interp`** — freeze the motion prior, behavior prior, and decoder;
-  train a residual encoder whose latent is a *fixed* linear blend of both
-  priors, `latent = alpha * (prior_mean + residual) + (1 - alpha) * rgm_z`.
-  Unlike `prior_gating` the blend weight `alpha` is a constant hyperparameter
-  (default 0.5), not learned, so the policy outputs only the residual (input: a
-  behavior_prior checkpoint).
+  blend the two priors with a *fixed* weight and add the trained residual on
+  top: `latent = alpha * prior_mean + (1 - alpha) * rgm_z + residual`. Unlike
+  `prior_gating` the blend weight `alpha` is a constant hyperparameter (default
+  0.5), not learned, so the policy outputs only the residual. `alpha` weights
+  the priors only — the residual keeps full authority throughout, and the
+  endpoints reproduce `res_control` (`alpha=1`) and `bp_res_control`
+  (`alpha=0`) exactly (input: a behavior_prior checkpoint).
 - **`scratch`** — train policy and decoder from random initialization; no
   upstream checkpoint needed beyond config-shape inference.
 

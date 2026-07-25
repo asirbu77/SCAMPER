@@ -5,7 +5,7 @@ Wrapper classes for different transfer learning modes:
 - PriorDecoderHighLevelWrapper: Policy outputs residual -> add to motion prior mean -> decoder -> ctrl (res_control mode)
 - RGMDecoderHighLevelWrapper: Policy outputs residual -> add to behavior prior mean -> decoder -> ctrl (bp_res_control mode)
 - PriorRGMDecoderHighLevelWrapper: Policy outputs residual + gate -> select motion prior or behavior prior -> decoder -> ctrl (prior_gating mode)
-- PriorRGMInterpDecoderHighLevelWrapper: Policy outputs residual -> fixed linear blend of motion prior and behavior prior -> decoder -> ctrl (prior_interp mode)
+- PriorRGMInterpDecoderHighLevelWrapper: Fixed linear blend of motion prior and behavior prior -> add policy residual on top -> decoder -> ctrl (prior_interp mode)
 - PriorScheduleDecoderHighLevelWrapper: Policy outputs residual -> scheduled stochastic gate selects behavior prior or motion prior -> decoder -> ctrl (prior_schedule mode)
 - FlatObsWrapper: Converts dict observations to flat arrays (scratch mode)
 
@@ -1034,16 +1034,19 @@ class PriorRGMInterpDecoderHighLevelWrapper(wrapper.Wrapper):
 
     Like PriorRGMDecoderHighLevelWrapper but the blend weight is a constant
     hyperparameter instead of a learned binary gate. Every step mixes both
-    priors:
+    priors, then applies the residual on top:
 
-    latent = alpha * (prior_mean + residual) + (1 - alpha) * rgm_z
+    latent = alpha * prior_mean + (1 - alpha) * rgm_z + residual
+
+    alpha controls only the prior mixture; the residual keeps full authority at
+    every alpha.
 
     The policy outputs only the residual, so the action size is latent_size
     (no gate head, no hysteresis, no carried gate state).
 
-    At alpha=1 this reduces to res_control (prior_mean + residual); as alpha
-    approaches 0 it reduces to deterministic bp_res_control with an inert
-    residual. Note that the residual's effective authority is scaled by alpha.
+    Both endpoints reproduce an existing mode exactly: alpha=1 gives
+    prior_mean + residual (res_control), and alpha=0 gives rgm_z + residual
+    (bp_res_control).
     """
 
     def __init__(
@@ -1067,10 +1070,11 @@ class PriorRGMInterpDecoderHighLevelWrapper(wrapper.Wrapper):
             decoder_inference_fn: Function (latent_proprio) -> (action, extras)
             latent_size: Dimension of the latent intention space.
             proprio_size: Size of proprioceptive observations.
-            alpha: Fixed blend weight in (0, 1]. 1.0 uses the motion prior plus
-                residual only; smaller values weight the behavior prior more.
-                0.0 is rejected because it makes the residual inert (no
-                gradient reaches the policy).
+            alpha: Fixed blend weight in [0, 1] applied to the two priors only.
+                1.0 uses the motion prior (== res_control), 0.0 uses the
+                behavior prior (== bp_res_control), and intermediate values
+                mix them. The residual is added afterwards at full strength
+                regardless of alpha.
             rgm_noise: If True, sample RGM latent with noise. If False,
                 use rgm_mean only (deterministic).
             rgm_logvar: Fixed log-variance for RGM sampling. Only used when
@@ -1078,14 +1082,10 @@ class PriorRGMInterpDecoderHighLevelWrapper(wrapper.Wrapper):
                 If a float, overrides the predicted logvar with this value.
 
         Raises:
-            ValueError: If alpha is outside (0, 1].
+            ValueError: If alpha is outside [0, 1].
         """
-        if not 0.0 < alpha <= 1.0:
-            raise ValueError(
-                f"prior_interp alpha must be in (0, 1], got {alpha}. "
-                "alpha=0 makes the residual inert (the policy receives no "
-                "gradient); use mode=bp_res_control instead."
-            )
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError(f"prior_interp alpha must be in [0, 1], got {alpha}.")
         self._prior_fn = prior_inference_fn
         self._rgm_fn = rgm_inference_fn
         self._decoder_fn = decoder_inference_fn
@@ -1164,11 +1164,10 @@ class PriorRGMInterpDecoderHighLevelWrapper(wrapper.Wrapper):
         else:
             rgm_z = rgm_mean
 
-        # Prior + residual
-        prior_residual = prior_mean + residual
-
-        # Fixed linear interpolation between the two priors
-        latent = self._alpha * prior_residual + (1.0 - self._alpha) * rgm_z
+        # Fixed linear interpolation between the two priors, then the residual
+        # is applied on top at full strength (independent of alpha).
+        blend = self._alpha * prior_mean + (1.0 - self._alpha) * rgm_z
+        latent = blend + residual
 
         state.info["rng"] = rng
 

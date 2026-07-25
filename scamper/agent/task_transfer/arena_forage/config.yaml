@@ -51,13 +51,13 @@ prior_gating:
   rgm_logvar: -2.25 # null = use predicted logvar, float = fixed logvar (only when rgm_noise=true)
 
 prior_interp:
-  # Fixed linear blend of both priors:
-  #   latent = alpha * (prior_mean + residual) + (1 - alpha) * rgm_z
-  # The policy outputs only the residual (action size = latent_size).
-  alpha: 0.5        # Blend weight in (0, 1]. 1.0 = motion prior + residual only;
-                    # smaller values weight the behavior prior more. Note the
-                    # residual's effective authority is scaled by alpha. 0.0 is
-                    # rejected (residual becomes inert) -- use bp_res_control.
+  # Fixed linear blend of both priors, with the residual added on top:
+  #   latent = alpha * prior_mean + (1 - alpha) * rgm_z + residual
+  # alpha weights the priors only; the residual keeps full authority at every
+  # alpha. The policy outputs only the residual (action size = latent_size).
+  alpha: 0.5        # Blend weight in [0, 1]. Both endpoints reproduce an
+                    # existing mode exactly: 1.0 == res_control (prior_mean +
+                    # residual), 0.0 == bp_res_control (rgm_z + residual).
   rgm_noise: false  # false = deterministic (rgm_z = rgm_mean), true = sample with noise
   rgm_logvar: -2.0  # null = use predicted logvar, float = fixed logvar (only when rgm_noise=true)
 
