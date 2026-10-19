@@ -87,11 +87,13 @@ scamper/
 ├── train_distill_expert.py      # Stage 2 (main): DAgger into VAE student
 ├── train_behavior_prior.py      # Stage 3: behavior-prior on top of distill checkpoint
 ├── train_mimic_mjx.py           # Alternate stage 2: end-to-end VAE PPO
+├── train_scratch.py             # Alternate stage 2: encoder+decoder+motion prior via PPO
 ├── config/                      # Hydra configs (one per train script)
 ├── agent/
 │   ├── expert/                  # Expert MLP networks + PPO
 │   ├── imitation/               # VAE intention networks + PPO + losses
 │   ├── distill_expert/          # DAgger distillation pieces
+│   ├── scratch/                 # From-scratch PPO over the 3-network system
 │   ├── behavior_prior/          # Behavior-prior networks + losses
 │   └── task_transfer/           # arena_forage / maintain_velocity / walk_rear
 ├── environment/                 # Rodent envs + reference-clip loader
@@ -138,6 +140,22 @@ python -m scamper.train_behavior_prior \
 Trains a behavior prior on top of the frozen distill_expert encoder / decoder /
 motion prior, using a KL loss. Saves under `step_prefix="DistillPriorNetwork"`.
 
+### Alternate stage 2: From scratch (PPO, no teacher)
+
+```bash
+python -m scamper.train_scratch
+```
+
+Trains the same three networks as stage 2 — encoder + decoder + motion prior,
+with the same `KL(encoder ‖ motion prior)` and AR(1) latent losses, weights and
+schedule — but with PPO on the imitation reward instead of DAgger against an
+expert teacher. No upstream checkpoint is required.
+
+It saves under `step_prefix="DistillNetwork"` with the same policy-tree layout
+as `train_distill_expert`, so the result is a drop-in input for
+`train_behavior_prior` and task transfer's `res_control` mode. Scratch
+checkpoints are tagged with `network_config.arch_name: scratch`.
+
 All entry points are Hydra apps; pass arbitrary config overrides on the
 command line (e.g., `train_setup.train_config.num_envs=4096`,
 `logging_config.exp_name=...`). The Hydra config files are in `scamper/config/`.
@@ -156,19 +174,40 @@ downstream task by running the corresponding task-transfer entry point.
 
 ### Modes (per task)
 
-| Task | `mimic_mjx` | `res_control` | `prior_gating` | `scratch` |
-|---|:---:|:---:|:---:|:---:|
-| `arena_forage`     | ✓ | ✓ | ✓ | ✓ |
-| `maintain_velocity`| ✓ | ✓ |   | ✓ |
-| `walk_rear`        | ✓ | ✓ |   | ✓ |
+| Task | `mimic_mjx` | `res_control` | `bp_res_control` | `prior_gating` | `prior_interp` | `prior_schedule` | `scratch` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `arena_forage`     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `maintain_velocity`| ✓ | ✓ |   |   |   |   | ✓ |
+| `walk_rear`        | ✓ | ✓ |   |   |   |   | ✓ |
 
 - **`mimic_mjx`** — freeze the decoder; train a fresh task encoder over it
   (input: a mimic-mjx checkpoint).
 - **`res_control`** — freeze the motion prior + decoder; train a residual
-  encoder on top (input: a distill_expert checkpoint).
+  encoder on top (input: a distill_expert or train_scratch checkpoint).
+- **`bp_res_control`** — freeze the behavior prior (RGM) + decoder; train a
+  residual encoder that additively controls the RGM latent, i.e. the
+  behavior-prior analogue of `res_control` (input: a behavior_prior checkpoint).
 - **`prior_gating`** — freeze the motion prior, behavior prior, and decoder;
   train a residual encoder + a gate that switches between priors (input: a
   behavior_prior checkpoint).
+- **`prior_interp`** — freeze the motion prior, behavior prior, and decoder;
+  blend the two priors with a *fixed* weight and add the trained residual on
+  top: `latent = alpha * prior_mean + (1 - alpha) * rgm_z + residual`. Unlike
+  `prior_gating` the blend weight `alpha` is a constant hyperparameter (default
+  0.5), not learned, so the policy outputs only the residual. `alpha` weights
+  the priors only — the residual keeps full authority throughout, and the
+  endpoints reproduce `res_control` (`alpha=1`) and `bp_res_control`
+  (`alpha=0`) exactly (input: a behavior_prior checkpoint).
+- **`prior_schedule`** — freeze the motion prior, behavior prior, and decoder;
+  same binary latent as `prior_gating`
+  (`latent = gate * (prior_mean + residual) + (1 - gate) * rgm_z`), but the gate
+  follows a fixed exploration schedule instead of being a policy output. The
+  gate is a two-state Markov chain whose P(gate=1) ramps `p_start` → `p_end`
+  after a warmup (`warmup_frac`, `ramp_frac`, `ramp_shape`) and switches in
+  bouts of timescale `bout_tau`. The policy outputs only the residual, so
+  checkpoints are not interchangeable with `prior_gating`. `eval/episode_reward`
+  is computed at fixed `eval_progress` (default 1.0) (input: a behavior_prior
+  checkpoint).
 - **`scratch`** — train policy and decoder from random initialization; no
   upstream checkpoint needed beyond config-shape inference.
 
@@ -188,6 +227,20 @@ python -m scamper.agent.task_transfer.maintain_velocity.train \
 
 python -m scamper.agent.task_transfer.arena_forage.train \
     mode=prior_gating \
+    checkpoint.path=/path/to/behavior_prior_checkpoint
+
+python -m scamper.agent.task_transfer.arena_forage.train \
+    mode=bp_res_control \
+    checkpoint.path=/path/to/behavior_prior_checkpoint
+
+python -m scamper.agent.task_transfer.arena_forage.train \
+    mode=prior_interp \
+    prior_interp.alpha=0.5 \
+    checkpoint.path=/path/to/behavior_prior_checkpoint
+
+python -m scamper.agent.task_transfer.arena_forage.train \
+    mode=prior_schedule \
+    prior_schedule.p_start=0.05 \
     checkpoint.path=/path/to/behavior_prior_checkpoint
 
 python -m scamper.agent.task_transfer.walk_rear.train mode=scratch

@@ -783,6 +783,19 @@ def load_from_run_state_distill(
     return _load_from_run_state_with_prefix(cfg, step_prefix="DistillNetwork")
 
 
+def load_from_run_state_scratch(
+    cfg: DictConfig,
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Load or create run state for from-scratch three-network training.
+
+    Deliberately shares the DistillNetwork step prefix with distillation: a
+    scratch run produces the same checkpoint layout so downstream task_transfer
+    and behavior-prior loaders accept it unchanged. Run-state files are keyed by
+    a hash of the config, so scratch and distill runs do not collide.
+    """
+    return _load_from_run_state_with_prefix(cfg, step_prefix="DistillNetwork")
+
+
 def load_from_run_state_behavior_prior(
     cfg: DictConfig,
 ) -> tuple[str, str, dict[str, Any] | None]:

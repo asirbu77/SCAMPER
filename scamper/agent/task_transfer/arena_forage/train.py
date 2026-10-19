@@ -1,9 +1,12 @@
 """Arena forage task transfer training with Brax PPO.
 
-Four training modes:
+Seven training modes:
 - mimic_mjx: Freeze decoder, train new encoder
 - res_control: Freeze motion prior + decoder, train residual encoder (from distill_expert checkpoint)
+- bp_res_control: Freeze behavior prior (rgm) + decoder, train residual encoder (from behavior_prior checkpoint)
 - prior_gating: Freeze motion prior + behavior prior + decoder, train residual + gate (from behavior_prior checkpoint)
+- prior_interp: Freeze motion prior + behavior prior + decoder, train residual with a fixed linear blend of both priors (from behavior_prior checkpoint)
+- prior_schedule: Like prior_gating, but the gate follows a fixed exploration schedule instead of being a policy output (from behavior_prior checkpoint)
 - scratch: Train both policy and decoder from random initialization
 
 Supports Orbax checkpointing and SLURM preemption recovery.
@@ -11,7 +14,10 @@ Supports Orbax checkpointing and SLURM preemption recovery.
 Usage:
     python -m scamper.agent.task_transfer.arena_forage.train mode=mimic_mjx
     python -m scamper.agent.task_transfer.arena_forage.train mode=res_control
+    python -m scamper.agent.task_transfer.arena_forage.train mode=bp_res_control
     python -m scamper.agent.task_transfer.arena_forage.train mode=prior_gating
+    python -m scamper.agent.task_transfer.arena_forage.train mode=prior_interp
+    python -m scamper.agent.task_transfer.arena_forage.train mode=prior_schedule
     python -m scamper.agent.task_transfer.arena_forage.train mode=scratch
 """
 
@@ -77,6 +83,9 @@ from scamper.agent.task_transfer.arena_forage.wrappers import (
     FlatObsWrapper,
     PriorDecoderHighLevelWrapper,
     PriorRGMDecoderHighLevelWrapper,
+    PriorRGMInterpDecoderHighLevelWrapper,
+    PriorScheduleDecoderHighLevelWrapper,
+    RGMDecoderHighLevelWrapper,
 )
 from scamper.agent.task_transfer.arena_forage.scratch_networks import (
     make_scratch_ppo_networks,
@@ -157,8 +166,8 @@ def main(cfg: DictConfig) -> None:
 
     # `prior_params` defaults to None; only set by modes that load a prior.
     prior_params = None
-    if cfg.mode == "prior_gating":
-        logging.info(f"Loading prior_gating checkpoint from: {prior_checkpoint_path}")
+    if cfg.mode in ("prior_gating", "prior_interp", "prior_schedule", "bp_res_control"):
+        logging.info(f"Loading {cfg.mode} checkpoint from: {prior_checkpoint_path}")
         (
             encoder_params,
             prior_params,
@@ -202,7 +211,7 @@ def main(cfg: DictConfig) -> None:
         "decoder_params": decoder_params,
         "imitation_normalizer": normalizer_params,
     }
-    if cfg.mode == "prior_gating":
+    if cfg.mode in ("prior_gating", "prior_interp", "prior_schedule", "bp_res_control"):
         frozen_networks["rgm_params"] = rgm_params
 
     # Create inference functions
@@ -296,7 +305,82 @@ def main(cfg: DictConfig) -> None:
                 rgm_noise=mode_cfg.rgm_noise,
                 rgm_logvar=rgm_logvar,
             )
-        else:  # res_control
+        elif cfg.mode == "prior_schedule":
+            prior_fn = make_prior_inference_fn(
+                prior_params, normalizer_params, ckpt_cfg
+            )
+            behavior_prior_fn = make_behavior_prior_inference_fn(
+                rgm_params, normalizer_params, ckpt_cfg
+            )
+            mode_cfg = cfg.prior_schedule
+            # The env is stepped inside the jitted PPO loop, so schedule
+            # progress is carried in state.info and advanced per step. Each of
+            # the num_envs parallel copies steps once per global env step batch,
+            # so one wrapper step is worth num_envs global timesteps (the
+            # action_repeat loop lives above this wrapper and is already
+            # counted by Brax as num_envs per inner step).
+            #
+            # Eval envs are frozen (progress_per_step=0) and pinned at
+            # eval_progress: Brax resets eval_env on every evaluation, so its
+            # own counter would always read "start of training".
+            if is_eval:
+                progress_per_step = 0.0
+                initial_progress = float(mode_cfg.get("eval_progress", 1.0))
+            else:
+                progress_per_step = cfg.train.num_envs / cfg.train.num_timesteps
+                initial_progress = step_offset / cfg.train.num_timesteps
+            return PriorScheduleDecoderHighLevelWrapper(
+                base_env,
+                prior_fn,
+                behavior_prior_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
+                progress_per_step=progress_per_step,
+                initial_progress=initial_progress,
+                p_start=mode_cfg.p_start,
+                p_end=mode_cfg.p_end,
+                warmup_frac=mode_cfg.warmup_frac,
+                ramp_frac=mode_cfg.ramp_frac,
+                ramp_shape=mode_cfg.get("ramp_shape", "cosine"),
+                bout_tau=mode_cfg.bout_tau,
+                rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=mode_cfg.get("rgm_logvar", None),
+            )
+        elif cfg.mode == "prior_interp":
+            prior_fn = make_prior_inference_fn(
+                prior_params, normalizer_params, ckpt_cfg
+            )
+            behavior_prior_fn = make_behavior_prior_inference_fn(
+                rgm_params, normalizer_params, ckpt_cfg
+            )
+            mode_cfg = cfg.prior_interp
+            return PriorRGMInterpDecoderHighLevelWrapper(
+                base_env,
+                prior_fn,
+                behavior_prior_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
+                alpha=mode_cfg.alpha,
+                rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=mode_cfg.get("rgm_logvar", None),
+            )
+        elif cfg.mode == "bp_res_control":
+            behavior_prior_fn = make_behavior_prior_inference_fn(
+                rgm_params, normalizer_params, ckpt_cfg
+            )
+            mode_cfg = cfg.bp_res_control
+            return RGMDecoderHighLevelWrapper(
+                base_env,
+                behavior_prior_fn,
+                decoder_fn,
+                latent_size,
+                proprio_size,
+                rgm_noise=mode_cfg.rgm_noise,
+                rgm_logvar=mode_cfg.get("rgm_logvar", None),
+            )
+        elif cfg.mode == "res_control":
             prior_fn = make_prior_inference_fn(
                 prior_params, normalizer_params, ckpt_cfg
             )
@@ -309,6 +393,12 @@ def main(cfg: DictConfig) -> None:
                 proprio_size,
                 deterministic_prior=mode_cfg.deterministic_prior,
                 noise_logvar=mode_cfg.noise_logvar,
+            )
+        else:
+            raise ValueError(
+                f"Unknown mode: {cfg.mode!r}. Expected one of: mimic_mjx, "
+                "res_control, bp_res_control, prior_gating, prior_interp, "
+                "prior_schedule, scratch."
             )
 
     env = make_wrapped_env(is_eval=False)
@@ -511,11 +601,23 @@ def main(cfg: DictConfig) -> None:
             eval_counter[0] += 1
             return
 
+        # prior_schedule: eval_env is frozen at eval_progress, so stamp the real
+        # training progress onto the reset state to make the logged rollout
+        # (video + gate curves) mirror what training is actually doing now.
+        post_reset_fn = None
+        if cfg.mode == "prior_schedule":
+            post_reset_fn = functools.partial(
+                eval_env.override_schedule_progress,
+                progress=min(adjusted_step / cfg.train.num_timesteps, 1.0),
+                rng=jax.random.PRNGKey(adjusted_step),
+            )
+
         # Rollout logging
         rollout_logging_fn(
             env=eval_env,
             jit_reset=jit_reset,
             jit_step=jit_step,
+            post_reset_fn=post_reset_fn,
             jit_inference_fn=lambda p, obs, rng: jit_logging_inference_fn(p, obs, rng),
             params=params,
             current_step=adjusted_step,

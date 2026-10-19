@@ -732,9 +732,21 @@ def hash_task_transfer_config(cfg: DictConfig) -> str:
     }
     if cfg.mode == "res_control":
         hashable["res_control"] = OmegaConf.to_container(cfg.res_control, resolve=True)
+    elif cfg.mode == "bp_res_control":
+        hashable["bp_res_control"] = OmegaConf.to_container(
+            cfg.bp_res_control, resolve=True
+        )
     elif cfg.mode == "prior_gating":
         hashable["prior_gating"] = OmegaConf.to_container(
             cfg.prior_gating, resolve=True
+        )
+    elif cfg.mode == "prior_interp":
+        hashable["prior_interp"] = OmegaConf.to_container(
+            cfg.prior_interp, resolve=True
+        )
+    elif cfg.mode == "prior_schedule":
+        hashable["prior_schedule"] = OmegaConf.to_container(
+            cfg.prior_schedule, resolve=True
         )
     cfg_str = json.dumps(hashable, sort_keys=True, default=str)
     return hashlib.md5(cfg_str.encode()).hexdigest()[:12]

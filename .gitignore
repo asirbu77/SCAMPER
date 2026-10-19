@@ -1,11 +1,15 @@
 # SCAMPER specific gitignore:
 data/
 wandb/
-scratch
+# Anchored to the repo root: this is the `scratch -> /network/scratch/...`
+# symlink. Unanchored it also matched `scamper/agent/scratch/`, silently
+# excluding that package from commits (and so from code-checkpointed jobs).
+/scratch
 pdfs/
 notes/
 notebooks_private/
 plotting_data/
+scripts_private/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
