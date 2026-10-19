@@ -9,6 +9,7 @@ pdfs/
 notes/
 notebooks_private/
 plotting_data/
+scripts_private/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
