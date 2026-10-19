@@ -174,16 +174,16 @@ downstream task by running the corresponding task-transfer entry point.
 
 ### Modes (per task)
 
-| Task | `mimic_mjx` | `res_control` | `bp_res_control` | `prior_gating` | `prior_interp` | `scratch` |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `arena_forage`     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `maintain_velocity`| ✓ | ✓ |   |   |   | ✓ |
-| `walk_rear`        | ✓ | ✓ |   |   |   | ✓ |
+| Task | `mimic_mjx` | `res_control` | `bp_res_control` | `prior_gating` | `prior_interp` | `prior_schedule` | `scratch` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `arena_forage`     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `maintain_velocity`| ✓ | ✓ |   |   |   |   | ✓ |
+| `walk_rear`        | ✓ | ✓ |   |   |   |   | ✓ |
 
 - **`mimic_mjx`** — freeze the decoder; train a fresh task encoder over it
   (input: a mimic-mjx checkpoint).
 - **`res_control`** — freeze the motion prior + decoder; train a residual
-  encoder on top (input: a distill_expert checkpoint).
+  encoder on top (input: a distill_expert or train_scratch checkpoint).
 - **`bp_res_control`** — freeze the behavior prior (RGM) + decoder; train a
   residual encoder that additively controls the RGM latent, i.e. the
   behavior-prior analogue of `res_control` (input: a behavior_prior checkpoint).
@@ -198,6 +198,16 @@ downstream task by running the corresponding task-transfer entry point.
   the priors only — the residual keeps full authority throughout, and the
   endpoints reproduce `res_control` (`alpha=1`) and `bp_res_control`
   (`alpha=0`) exactly (input: a behavior_prior checkpoint).
+- **`prior_schedule`** — freeze the motion prior, behavior prior, and decoder;
+  same binary latent as `prior_gating`
+  (`latent = gate * (prior_mean + residual) + (1 - gate) * rgm_z`), but the gate
+  follows a fixed exploration schedule instead of being a policy output. The
+  gate is a two-state Markov chain whose P(gate=1) ramps `p_start` → `p_end`
+  after a warmup (`warmup_frac`, `ramp_frac`, `ramp_shape`) and switches in
+  bouts of timescale `bout_tau`. The policy outputs only the residual, so
+  checkpoints are not interchangeable with `prior_gating`. `eval/episode_reward`
+  is computed at fixed `eval_progress` (default 1.0) (input: a behavior_prior
+  checkpoint).
 - **`scratch`** — train policy and decoder from random initialization; no
   upstream checkpoint needed beyond config-shape inference.
 
@@ -226,6 +236,11 @@ python -m scamper.agent.task_transfer.arena_forage.train \
 python -m scamper.agent.task_transfer.arena_forage.train \
     mode=prior_interp \
     prior_interp.alpha=0.5 \
+    checkpoint.path=/path/to/behavior_prior_checkpoint
+
+python -m scamper.agent.task_transfer.arena_forage.train \
+    mode=prior_schedule \
+    prior_schedule.p_start=0.05 \
     checkpoint.path=/path/to/behavior_prior_checkpoint
 
 python -m scamper.agent.task_transfer.walk_rear.train mode=scratch
