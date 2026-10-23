@@ -422,9 +422,7 @@ def create_batched_rollout_fn(
             # "prior_mean", behavior-prior (RGM) rollouts "behavior_prior_mean";
             # policies without a distinct mean (teacher, encoder-decoder) fall
             # back to z, so their `_means` equal their `_latents`.
-            mu = extras.get(
-                "prior_mean", extras.get("behavior_prior_mean", z)
-            )
+            mu = extras.get("prior_mean", extras.get("behavior_prior_mean", z))
 
             # Step environment
             next_state = jit_step(state, action)

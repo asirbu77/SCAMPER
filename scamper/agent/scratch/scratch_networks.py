@@ -156,7 +156,13 @@ class ScratchIntentionNetwork(nn.Module):
                     "intention": z,
                 },
             )
-        return action, latent_mean, latent_logvar, motion_prior_mean, motion_prior_logvar
+        return (
+            action,
+            latent_mean,
+            latent_logvar,
+            motion_prior_mean,
+            motion_prior_logvar,
+        )
 
 
 @flax.struct.dataclass

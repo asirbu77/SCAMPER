@@ -699,9 +699,7 @@ def train(
             max_steps=motion_prior_rollout_config.get("max_steps", 200),
             eval_interval=motion_prior_rollout_config.get("eval_interval", 1),
             render_fps=render_config.get("render_fps", 50),
-            render_camera_name=render_config.get(
-                "render_camera_name", "close_profile"
-            ),
+            render_camera_name=render_config.get("render_camera_name", "close_profile"),
             model_path=str(ckpt_mgr.directory),
         )
         logging.info("Multi-mode motion-prior rollout evaluator initialized")

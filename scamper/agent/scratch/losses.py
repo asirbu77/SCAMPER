@@ -200,7 +200,9 @@ def compute_ppo_loss(
     entropy_loss = entropy_cost * -entropy
 
     # Latent regularization weights (schedules are indexed by eval iteration)
-    current_kl_weight = kl_schedule_fn(step) if kl_schedule_fn is not None else kl_weight
+    current_kl_weight = (
+        kl_schedule_fn(step) if kl_schedule_fn is not None else kl_weight
+    )
     current_ar1_weight = (
         ar1_schedule_fn(step) if ar1_schedule_fn is not None else ar1_weight
     )
