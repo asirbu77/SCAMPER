@@ -1,4 +1,14 @@
-# SCAMPER
+<p align="center">
+  <img src="assets/scamper_logo.png" alt="SCAMPER" width="600">
+</p>
+
+<!-- Paste each GitHub-hosted video URL (https://github.com/user-attachments/assets/...) on its own line below. -->
+
+VIDEO_1_URL
+
+VIDEO_5_1_URL
+
+VIDEO_11_URL
 
 SCAMPER trains physically-grounded control policies for biomechanical rodent
 models by combining motion-capture imitation, hierarchical distillation, and
